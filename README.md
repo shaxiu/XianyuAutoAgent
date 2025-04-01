@@ -60,8 +60,8 @@
 git clone https://github.com/shaxiu/XianyuAutoAgent.git
 cd xianyu-autoagent
 
-2. 安装依赖
-pip install -r requirements.txt
+2. 准备环境
+sh setup_venv.sh
 
 3. 配置环境变量
 创建一个 `.env` 文件，包含以下内容：

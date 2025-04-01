@@ -79,7 +79,13 @@ class XianyuLive:
         await ws.send(json.dumps(msg))
 
     async def init(self, ws):
-        token = self.xianyu.get_token(self.cookies, self.device_id)['data']['accessToken']
+        try:
+            token_response = self.xianyu.get_token(self.cookies, self.device_id)
+            token = token_response['data']['accessToken']
+        except Exception as e:
+            logger.error("获取token失败. response : {}".format(token_response))
+            raise
+        
         msg = {
             "lwp": "/reg",
             "headers": {
@@ -420,7 +426,7 @@ class XianyuLive:
 
 if __name__ == '__main__':
     #加载环境变量 cookie
-    load_dotenv()
+    load_dotenv(override=True)
     cookies_str = os.getenv("COOKIES_STR")
     bot = XianyuReplyBot()
     xianyuLive = XianyuLive(cookies_str)
