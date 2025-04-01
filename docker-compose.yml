@@ -1,7 +1,7 @@
 services:
   xianyu-auto-agent:
     container_name: xianyu-auto-agent
-    image: ghcr.io/shaxiu/xianyuautoagent/xianyu-auto-agent:latest
+    image: ghcr.io/phantommaa/xianyu-auto-agent:latest
     # 如果需要本地构建，可以取消下面的注释
     # build:
     #   context: .
@@ -12,5 +12,3 @@ services:
     volumes:
       - ./data:/app/data
       - ./prompts:/app/prompts
-    networks:
-      - xianyu-network
