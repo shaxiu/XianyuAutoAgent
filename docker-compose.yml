@@ -2,10 +2,6 @@ services:
   xianyu-auto-agent:
     container_name: xianyu-auto-agent
     image: ghcr.io/phantommaa/xianyu-auto-agent:latest
-    # 如果需要本地构建，可以取消下面的注释
-    # build:
-    #   context: .
-    #   dockerfile: distribution/docker-image/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
