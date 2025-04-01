@@ -3,6 +3,10 @@ FROM python:3.8-slim
 # Set working directory
 WORKDIR /app
 
+# Set timezone to Asia/Shanghai (UTC+8)
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # Install NodeJS 18
 RUN apt-get update && apt-get install -y \
     curl \
