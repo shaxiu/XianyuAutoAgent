@@ -1,7 +1,5 @@
 # 环境变量文件（包含敏感信息）
 .env
-# 提示词文件
-*_prompt.txt
 # Python缓存文件
 __pycache__/
 *.py[cod]
