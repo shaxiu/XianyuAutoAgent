@@ -230,7 +230,6 @@ class XianyuLive:
                 return
             elif not self.is_chat_message(message):
                 logger.debug("其他非聊天消息")
-                logger.debug(f"原始消息: {message}")
                 return
 
             # 处理聊天消息
@@ -256,6 +255,13 @@ class XianyuLive:
                 return
                 
             item_info = self.xianyu.get_item_info(self.cookies, item_id)['data']['itemDO']
+            
+            # 判断是否为买家消息（当前用户是买家）
+            seller_id = str(item_info.get('userId', ''))
+            if seller_id != self.myid:
+                logger.debug(f"过滤掉我作为买家的消息")
+                return
+                
             item_description = f"{item_info['desc']};当前商品售卖价格为:{str(item_info['soldPrice'])}"
             
             logger.info(f"user: {send_user_name}, 发送消息: {send_message}")
