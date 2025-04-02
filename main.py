@@ -79,7 +79,13 @@ class XianyuLive:
         await ws.send(json.dumps(msg))
 
     async def init(self, ws):
-        token = self.xianyu.get_token(self.cookies, self.device_id)['data']['accessToken']
+        try:
+            token_response = self.xianyu.get_token(self.cookies, self.device_id)
+            token = token_response['data']['accessToken']
+        except Exception as e:
+            logger.error("获取token失败. response : {}".format(token_response))
+            raise
+        
         msg = {
             "lwp": "/reg",
             "headers": {
@@ -224,7 +230,6 @@ class XianyuLive:
                 return
             elif not self.is_chat_message(message):
                 logger.debug("其他非聊天消息")
-                logger.debug(f"原始消息: {message}")
                 return
 
             # 处理聊天消息
@@ -249,7 +254,21 @@ class XianyuLive:
                 logger.warning("无法获取商品ID")
                 return
                 
-            item_info = self.xianyu.get_item_info(self.cookies, item_id)['data']['itemDO']
+            # 获取商品信息并检查itemDO是否存在
+            item_info_response = self.xianyu.get_item_info(self.cookies, item_id)
+            
+            # 使用get方法安全地获取嵌套数据
+            item_info = item_info_response.get('data', {}).get('itemDO', {})
+            if not item_info:
+                logger.error(f"获取商品信息失败，itemDO不存在: {json.dumps(item_info_response, ensure_ascii=False)}")
+                return
+            
+            # 判断是否为买家消息（当前用户是买家）
+            seller_id = item_info.get('trackParams', {}).get('sellerId', '')
+            if seller_id != self.myid:
+                logger.debug(f"过滤掉我作为买家的消息")
+                return
+                
             item_description = f"{item_info['desc']};当前商品售卖价格为:{str(item_info['soldPrice'])}"
             
             logger.info(f"user: {send_user_name}, 发送消息: {send_message}")
@@ -420,7 +439,7 @@ class XianyuLive:
 
 if __name__ == '__main__':
     #加载环境变量 cookie
-    load_dotenv()
+    load_dotenv(override=True)
     cookies_str = os.getenv("COOKIES_STR")
     bot = XianyuReplyBot()
     xianyuLive = XianyuLive(cookies_str)

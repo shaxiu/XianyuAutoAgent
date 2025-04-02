@@ -1,0 +1,10 @@
+services:
+  xianyu-auto-agent:
+    container_name: xianyu-auto-agent
+    image: ghcr.io/phantommaa/xianyu-auto-agent:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./prompts:/app/prompts
