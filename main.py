@@ -13,6 +13,7 @@ from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, gener
 from XianyuAgent import XianyuReplyBot
 from context_manager import ChatContextManager
 
+from utils.notifier import NotificationManager, FeishuNotifier
 
 class XianyuLive:
     def __init__(self, cookies_str):
@@ -31,6 +32,46 @@ class XianyuLive:
         self.last_heartbeat_response = 0
         self.heartbeat_task = None
         self.ws = None
+
+        # 添加通知管理器
+        self.notification_manager = self._init_notification_manager()
+        
+        # 添加Cookie过期检测
+        self.cookie_check_interval = 3600  # 每小时检查一次Cookie
+        self.last_cookie_check_time = time.time()
+
+    def _init_notification_manager(self):
+        """初始化通知管理器"""
+        manager = NotificationManager()
+        
+        # 飞书通知
+        if os.getenv("ENABLE_FEISHU_NOTIFY", "false").lower() == "true":
+            feishu_notifier = FeishuNotifier(
+                app_id=os.getenv("FEISHU_APP_ID", ""),
+                app_secret=os.getenv("FEISHU_APP_SECRET", ""),
+                receive_id_type=os.getenv("FEISHU_RECEIVE_ID_TYPE", "chat_id"),
+                receive_id=os.getenv("FEISHU_RECEIVE_ID", "")
+            )
+            manager.add_notifier(feishu_notifier)
+            logger.info("已启用飞书通知")
+        
+        return manager
+    
+    async def check_cookie_valid(self):
+        """检查Cookie是否有效"""
+        try:
+            # 尝试获取token，如果失败则说明Cookie已过期
+            token_response = self.xianyu.get_token(self.cookies, self.device_id)
+            if token_response.get('ret') and token_response['ret'][0] != "SUCCESS::调用成功":
+                logger.error(f"Cookie已过期: {token_response}")
+                self.notification_manager.notify_cookie_expired()
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"检查Cookie时出错: {e}")
+            self.notification_manager.notify_error("Cookie检查错误", str(e))
+            return False
+
 
     async def send_msg(self, ws, cid, toid, text):
         text = {
@@ -340,8 +381,20 @@ class XianyuLive:
         return False
 
     async def main(self):
+        # 系统启动通知
+        self.notification_manager.notify_system_start()
+
         while True:
             try:
+                # 检查Cookie是否有效
+                current_time = time.time()
+                if current_time - self.last_cookie_check_time >= self.cookie_check_interval:
+                    self.last_cookie_check_time = current_time
+                    if not await self.check_cookie_valid():
+                        logger.warning("Cookie无效，等待30分钟后重试...")
+                        await asyncio.sleep(1800)  # 等待30分钟后重试
+                        continue
+
                 headers = {
                     "Cookie": self.cookies_str,
                     "Host": "wss-goofish.dingtalk.com",
@@ -399,6 +452,7 @@ class XianyuLive:
 
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("WebSocket连接已关闭")
+                self.notification_manager.notify_error("连接错误", "WebSocket连接已关闭", "系统将在5秒后尝试重连")
                 if self.heartbeat_task:
                     self.heartbeat_task.cancel()
                     try:
@@ -409,6 +463,7 @@ class XianyuLive:
                 
             except Exception as e:
                 logger.error(f"连接发生错误: {e}")
+                self.notification_manager.notify_error("连接错误", str(e), "系统将在5秒后尝试重连")
                 if self.heartbeat_task:
                     self.heartbeat_task.cancel()
                     try:
