@@ -10,6 +10,7 @@ from XianyuApis import XianyuApis
 
 
 from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, generate_device_id, decrypt
+from utils.db_manager import DatabaseManager  # 导入数据库管理器
 from XianyuAgent import XianyuReplyBot
 from context_manager import ChatContextManager
 
@@ -24,6 +25,7 @@ class XianyuLive:
         self.myid = self.cookies['unb']
         self.device_id = generate_device_id(self.myid)
         self.context_manager = ChatContextManager()
+        self.db_manager = DatabaseManager()  # 初始化数据库管理器
         
         # 心跳相关配置
         self.heartbeat_interval = 15  # 心跳间隔15秒
@@ -259,17 +261,33 @@ class XianyuLive:
                     item_info = api_result['data']['itemDO']
                     # 保存商品信息到数据库
                     self.context_manager.save_item_info(item_id, item_info)
+                    
+                    # 同时保存到SQLite数据库
+                    self.db_manager.save_item(item_id, item_info)
                 else:
                     logger.warning(f"获取商品信息失败: {api_result}")
                     return
             else:
                 logger.info(f"从数据库获取商品信息: {item_id}")
+                # 确保商品信息也存在于SQLite数据库中
+                self.db_manager.save_item(item_id, item_info)
                 
             item_description = f"{item_info['desc']};当前商品售卖价格为:{str(item_info['soldPrice'])}"
             logger.info(f"user: {send_user_name}, 发送消息: {send_message}")
             
+            # 将用户保存到数据库
+            self.db_manager.save_user(send_user_id)
+            
+            # 获取或创建会话ID
+            conversation_id = self.db_manager.get_or_create_conversation(send_user_id, item_id)
+            logger.info(f"会话ID: {conversation_id}")
+            
             # 添加用户消息到上下文
             self.context_manager.add_message(send_user_id, item_id, "user", send_message)
+            
+            # 同时保存到SQLite数据库
+            user_msg_id = self.db_manager.save_message(conversation_id, "user", send_message)
+            logger.info(f"保存用户消息: ID={user_msg_id}, 内容={send_message[:30]}...")
             
             # 获取完整的对话上下文
             context = self.context_manager.get_context(send_user_id, item_id)
@@ -282,13 +300,22 @@ class XianyuLive:
             )
             
             # 检查是否为价格意图，如果是则增加议价次数
+            intent = None
             if bot.last_intent == "price":
                 self.context_manager.increment_bargain_count(send_user_id, item_id)
                 bargain_count = self.context_manager.get_bargain_count(send_user_id, item_id)
                 logger.info(f"用户 {send_user_name} 对商品 {item_id} 的议价次数: {bargain_count}")
+                
+                # 同时更新SQLite数据库中的议价次数
+                self.db_manager.increment_bargain_count(conversation_id)
+                intent = "price"
             
             # 添加机器人回复到上下文
             self.context_manager.add_message(send_user_id, item_id, "assistant", bot_reply)
+            
+            # 同时保存到SQLite数据库
+            bot_msg_id = self.db_manager.save_message(conversation_id, "assistant", bot_reply, intent)
+            logger.info(f"保存机器人回复: ID={bot_msg_id}, 意图={intent}, 内容={bot_reply[:30]}...")
             
             logger.info(f"机器人回复: {bot_reply}")
             cid = message["1"]["2"].split('@')[0]
@@ -431,6 +458,11 @@ class XianyuLive:
                         pass
                 await asyncio.sleep(5)  # 等待5秒后重连
 
+    def __del__(self):
+        """确保在销毁对象时关闭数据库连接"""
+        if hasattr(self, 'db_manager'):
+            self.db_manager.close()
+
 
 if __name__ == '__main__':
     #加载环境变量 cookie
@@ -438,5 +470,15 @@ if __name__ == '__main__':
     cookies_str = os.getenv("COOKIES_STR")
     bot = XianyuReplyBot()
     xianyuLive = XianyuLive(cookies_str)
-    # 常驻进程
-    asyncio.run(xianyuLive.main())
+    
+    try:
+        # 常驻进程
+        asyncio.run(xianyuLive.main())
+    except KeyboardInterrupt:
+        # 优雅关闭
+        logger.info("程序正在关闭...")
+        xianyuLive.db_manager.close()
+        logger.info("数据库连接已关闭")
+    except Exception as e:
+        logger.error(f"程序异常退出: {e}")
+        xianyuLive.db_manager.close()

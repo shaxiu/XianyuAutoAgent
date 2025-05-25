@@ -52,3 +52,10 @@ htmlcov/
 .nox/
 .hypothesis/
 .coverage.* 
+
+# Node.js 相关
+node_modules/
+.next/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

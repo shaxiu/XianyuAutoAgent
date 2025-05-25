@@ -19,7 +19,7 @@
 | 核心引擎 | ✅ LLM自动回复<br>✅ 上下文管理 | 🔄 情感分析增强               |
 | 议价系统 | ✅ 阶梯降价策略                | 🔄 市场比价功能               |
 | 技术支持 | ✅ 网络搜索整合                | 🔄 RAG知识库增强              |
-| 运维监控 | ✅ 基础日志                    | 🔄 钉钉集成<br>🔄  Web管理界面 |
+| 运维监控 | ✅ 基础日志<br>✅ Web管理界面    | 🔄 钉钉集成                  |
 
 ## 🎨效果图
 <div align="center">
@@ -86,6 +86,25 @@ COOKIES_STR自行在闲鱼网页端获取cookies(网页端F12打开控制台，�
 python main.py
 ```
 
+### 使用管理后台
+
+本项目提供了一个Web管理后台，可以方便地查看和管理所有对话及系统设置：
+
+```bash
+# 启动管理后台
+./start_admin.sh
+```
+
+启动成功后，访问 http://localhost:3000 即可打开管理后台。
+
+管理后台功能：
+- 查看所有对话会话及统计数据
+- 管理系统设置（模型配置、议价策略等）
+- 手动发送消息到特定会话
+- 查看完整对话记录
+
+详细使用说明请参阅 [管理后台文档](./admin/README.md)。
+
 ### 自定义提示词
 
 可以通过编辑 `prompts` 目录下的文件来自定义各个专家的提示词：
@@ -145,7 +164,7 @@ https://github.com/cv-cat/XianYuApis
 您的☕和⭐将助力项目持续更新：
 
 <div align="center">
-  <img src="./images/wechat_pay.jpg" width="400px" alt="微信赞赏码"> 
+  <img src="./images/wechat_pay.jpg" width="400px" alt="微信赞赏码"> 
   <img src="./images/alipay.jpg" width="400px" alt="支付宝收款码">
 </div>
 
