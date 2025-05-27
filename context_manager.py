@@ -35,39 +35,25 @@ class ChatContextManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 创建消息表
+        # 检查数据库表结构，如果数据库由utils/db_manager.py创建，则不需要重新创建表
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='conversations'")
+        if cursor.fetchone():
+            logger.info(f"数据库表结构已存在，跳过创建: {self.db_path}")
+            conn.close()
+            return
+            
+        # 以下创建表的代码仅在数据库不存在时执行
+        # 用户表
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            item_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP,
+            conversation_count INTEGER DEFAULT 1
         )
         ''')
         
-        # 创建索引以加速查询
-        cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_user_item ON messages (user_id, item_id)
-        ''')
-        
-        cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_timestamp ON messages (timestamp)
-        ''')
-        
-        # 创建议价次数表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS bargain_counts (
-            user_id TEXT NOT NULL,
-            item_id TEXT NOT NULL,
-            count INTEGER DEFAULT 0,
-            last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (user_id, item_id)
-        )
-        ''')
-        
-        # 创建商品信息表
+        # 商品表
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
             item_id TEXT PRIMARY KEY,
@@ -75,6 +61,34 @@ class ChatContextManager:
             price REAL,
             description TEXT,
             last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        
+        # 会话表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            item_id TEXT,
+            start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_update TIMESTAMP,
+            bargain_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            FOREIGN KEY (user_id) REFERENCES users (user_id),
+            FOREIGN KEY (item_id) REFERENCES items (item_id)
+        )
+        ''')
+        
+        # 消息表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER,
+            role TEXT,
+            content TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            intent TEXT,
+            FOREIGN KEY (conversation_id) REFERENCES conversations (id)
         )
         ''')
         
@@ -96,31 +110,74 @@ class ChatContextManager:
         cursor = conn.cursor()
         
         try:
+            # 首先获取或创建会话ID
+            cursor.execute(
+                """
+                SELECT id FROM conversations 
+                WHERE user_id = ? AND item_id = ?
+                """, 
+                (user_id, item_id)
+            )
+            
+            conversation = cursor.fetchone()
+            
+            if not conversation:
+                # 创建新会话
+                cursor.execute(
+                    """
+                    INSERT INTO conversations (user_id, item_id, last_update) 
+                    VALUES (?, ?, ?)
+                    """,
+                    (user_id, item_id, datetime.now().isoformat())
+                )
+                conversation_id = cursor.lastrowid
+                logger.info(f"创建了新会话: ID={conversation_id}, 用户={user_id}, 商品={item_id}")
+            else:
+                conversation_id = conversation[0]
+                # 更新会话最后更新时间
+                cursor.execute(
+                    """
+                    UPDATE conversations 
+                    SET last_update = ? 
+                    WHERE id = ?
+                    """,
+                    (datetime.now().isoformat(), conversation_id)
+                )
+                logger.info(f"使用现有会话: ID={conversation_id}")
+            
             # 插入新消息
             cursor.execute(
-                "INSERT INTO messages (user_id, item_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)",
-                (user_id, item_id, role, content, datetime.now().isoformat())
+                """
+                INSERT INTO messages (conversation_id, role, content, timestamp) 
+                VALUES (?, ?, ?, ?)
+                """,
+                (conversation_id, role, content, datetime.now().isoformat())
             )
             
             # 检查是否需要清理旧消息
             cursor.execute(
                 """
                 SELECT id FROM messages 
-                WHERE user_id = ? AND item_id = ? 
+                WHERE conversation_id = ? 
                 ORDER BY timestamp DESC 
                 LIMIT ?, 1
                 """, 
-                (user_id, item_id, self.max_history)
+                (conversation_id, self.max_history)
             )
             
             oldest_to_keep = cursor.fetchone()
             if oldest_to_keep:
                 cursor.execute(
-                    "DELETE FROM messages WHERE user_id = ? AND item_id = ? AND id < ?",
-                    (user_id, item_id, oldest_to_keep[0])
+                    """
+                    DELETE FROM messages 
+                    WHERE conversation_id = ? AND id < ?
+                    """,
+                    (conversation_id, oldest_to_keep[0])
                 )
+                logger.debug(f"清理了会话 {conversation_id} 中的旧消息")
             
             conn.commit()
+            logger.info(f"已添加新消息: 会话={conversation_id}, 角色={role}, 内容={content[:30]}...")
         except Exception as e:
             logger.error(f"添加消息到数据库时出错: {e}")
             conn.rollback()
@@ -139,19 +196,48 @@ class ChatContextManager:
         cursor = conn.cursor()
         
         try:
-            # 使用UPSERT语法（SQLite 3.24.0及以上版本支持）
+            # 查找会话ID
             cursor.execute(
                 """
-                INSERT INTO bargain_counts (user_id, item_id, count, last_updated)
-                VALUES (?, ?, 1, ?)
-                ON CONFLICT(user_id, item_id) 
-                DO UPDATE SET count = count + 1, last_updated = ?
+                SELECT id FROM conversations 
+                WHERE user_id = ? AND item_id = ?
+                """, 
+                (user_id, item_id)
+            )
+            
+            conversation = cursor.fetchone()
+            
+            if not conversation:
+                logger.warning(f"找不到用户 {user_id} 和商品 {item_id} 的会话记录，无法增加议价次数")
+                return
+                
+            conversation_id = conversation[0]
+            
+            # 更新会话的议价次数
+            cursor.execute(
+                """
+                UPDATE conversations 
+                SET bargain_count = bargain_count + 1,
+                    last_update = ?
+                WHERE id = ?
                 """,
-                (user_id, item_id, datetime.now().isoformat(), datetime.now().isoformat())
+                (datetime.now().isoformat(), conversation_id)
             )
             
             conn.commit()
-            logger.debug(f"用户 {user_id} 商品 {item_id} 议价次数已增加")
+            logger.info(f"用户 {user_id} 商品 {item_id} (会话ID: {conversation_id}) 议价次数已增加")
+            
+            # 查询更新后的议价次数
+            cursor.execute(
+                """
+                SELECT bargain_count FROM conversations WHERE id = ?
+                """,
+                (conversation_id,)
+            )
+            
+            bargain_count = cursor.fetchone()[0]
+            logger.info(f"当前议价次数: {bargain_count}")
+            
         except Exception as e:
             logger.error(f"增加议价次数时出错: {e}")
             conn.rollback()
@@ -173,8 +259,12 @@ class ChatContextManager:
         cursor = conn.cursor()
         
         try:
+            # 查找会话
             cursor.execute(
-                "SELECT count FROM bargain_counts WHERE user_id = ? AND item_id = ?",
+                """
+                SELECT bargain_count FROM conversations 
+                WHERE user_id = ? AND item_id = ?
+                """,
                 (user_id, item_id)
             )
             
@@ -201,20 +291,66 @@ class ChatContextManager:
         cursor = conn.cursor()
         
         try:
+            # 首先从conversations表获取会话ID
+            cursor.execute(
+                """
+                SELECT id FROM conversations 
+                WHERE user_id = ? AND item_id = ?
+                """, 
+                (user_id, item_id)
+            )
+            
+            conversation = cursor.fetchone()
+            
+            if not conversation:
+                logger.warning(f"找不到用户 {user_id} 和商品 {item_id} 的会话记录")
+                # 兼容处理：尝试从旧的messages表结构中获取数据
+                cursor.execute(
+                    """
+                    SELECT role, content FROM messages 
+                    WHERE user_id = ? AND item_id = ? 
+                    ORDER BY timestamp ASC
+                    LIMIT ?
+                    """, 
+                    (user_id, item_id, self.max_history)
+                )
+                
+                messages = [{"role": role, "content": content} for role, content in cursor.fetchall()]
+                
+                if messages:
+                    logger.info(f"从旧的messages表结构获取到 {len(messages)} 条消息")
+                    return messages
+                    
+                return []
+                
+            conversation_id = conversation[0]
+            logger.info(f"找到会话ID: {conversation_id}")
+            
+            # 使用会话ID从messages表获取消息
             cursor.execute(
                 """
                 SELECT role, content FROM messages 
-                WHERE user_id = ? AND item_id = ? 
+                WHERE conversation_id = ? 
                 ORDER BY timestamp ASC
                 LIMIT ?
                 """, 
-                (user_id, item_id, self.max_history)
+                (conversation_id, self.max_history)
             )
             
             messages = [{"role": role, "content": content} for role, content in cursor.fetchall()]
             
-            # 获取议价次数并添加到上下文中
-            bargain_count = self.get_bargain_count(user_id, item_id)
+            # 获取议价次数
+            cursor.execute(
+                """
+                SELECT bargain_count FROM conversations
+                WHERE id = ?
+                """,
+                (conversation_id,)
+            )
+            
+            bargain_result = cursor.fetchone()
+            bargain_count = bargain_result[0] if bargain_result else 0
+            
             if bargain_count > 0:
                 # 添加一条系统消息，包含议价次数信息
                 messages.append({
@@ -222,6 +358,11 @@ class ChatContextManager:
                     "content": f"议价次数: {bargain_count}"
                 })
             
+            if not messages:
+                logger.warning(f"会话 {conversation_id} 未找到消息记录")
+            else:
+                logger.info(f"获取到 {len(messages)} 条消息记录")
+                
         except Exception as e:
             logger.error(f"获取对话历史时出错: {e}")
             messages = []
@@ -245,7 +386,7 @@ class ChatContextManager:
         
         try:
             cursor.execute(
-                "SELECT DISTINCT item_id FROM messages WHERE user_id = ?", 
+                "SELECT DISTINCT item_id FROM conversations WHERE user_id = ?", 
                 (user_id,)
             )
             
@@ -274,9 +415,8 @@ class ChatContextManager:
         try:
             cursor.execute(
                 """
-                SELECT DISTINCT user_id FROM messages 
-                GROUP BY user_id
-                ORDER BY MAX(timestamp) DESC
+                SELECT DISTINCT user_id FROM conversations 
+                ORDER BY last_update DESC
                 LIMIT ?
                 """, 
                 (limit,)
@@ -307,30 +447,42 @@ class ChatContextManager:
         try:
             # 获取用户消息总数
             cursor.execute(
-                "SELECT COUNT(*) FROM messages WHERE user_id = ?", 
+                """
+                SELECT COUNT(*) FROM messages m
+                JOIN conversations c ON m.conversation_id = c.id
+                WHERE c.user_id = ?
+                """, 
                 (user_id,)
             )
             total_messages = cursor.fetchone()[0]
             
             # 获取用户交互的商品数
             cursor.execute(
-                "SELECT COUNT(DISTINCT item_id) FROM messages WHERE user_id = ?", 
+                "SELECT COUNT(DISTINCT item_id) FROM conversations WHERE user_id = ?", 
                 (user_id,)
             )
             total_items = cursor.fetchone()[0]
             
-            # 获取用户最早和最近的消息时间
+            # 获取用户最早和最近的互动时间
             cursor.execute(
-                "SELECT MIN(timestamp), MAX(timestamp) FROM messages WHERE user_id = ?", 
+                "SELECT MIN(start_time), MAX(last_update) FROM conversations WHERE user_id = ?", 
                 (user_id,)
             )
             first_time, last_time = cursor.fetchone()
+            
+            # 获取议价总次数
+            cursor.execute(
+                "SELECT SUM(bargain_count) FROM conversations WHERE user_id = ?",
+                (user_id,)
+            )
+            total_bargains = cursor.fetchone()[0] or 0
             
             stats = {
                 "total_messages": total_messages,
                 "total_items": total_items,
                 "first_interaction": first_time,
-                "last_interaction": last_time
+                "last_interaction": last_time,
+                "total_bargains": total_bargains
             }
         except Exception as e:
             logger.error(f"获取用户统计信息时出错: {e}")

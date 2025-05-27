@@ -1,102 +1,71 @@
 #!/usr/bin/env python3
 """
-修复数据库中的日期问题
+修复数据库中的日期格式问题
 """
 
 import os
 import sys
 import sqlite3
-from datetime import datetime
+from pathlib import Path
+import logging
 
-# 添加项目根目录到系统路径
-ROOT_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-sys.path.append(ROOT_DIR)
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # 数据库路径
-DB_PATH = os.path.join(ROOT_DIR, "data", "xianyu_messages.db")
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(ROOT_DIR, "data", "chat_history.db")
 
 def fix_dates():
-    """修复数据库中的日期问题"""
+    """修复数据库中的日期格式"""
+    if not os.path.exists(DB_PATH):
+        logger.error(f"数据库文件不存在: {DB_PATH}")
+        sys.exit(1)
+    
+    logger.info(f"连接数据库: {DB_PATH}")
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
     try:
-        # 确保数据目录存在
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        # 查询并修复conversations表中的last_update字段
+        logger.info("修复conversations表中的last_update字段...")
+        cursor.execute("SELECT id, last_update FROM conversations")
+        conversations = cursor.fetchall()
         
-        # 连接数据库
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        updates = 0
+        for conv in conversations:
+            if conv['last_update'] and ' ' in conv['last_update']:
+                new_date = conv['last_update'].replace(' ', 'T')
+                cursor.execute("UPDATE conversations SET last_update = ? WHERE id = ?", (new_date, conv['id']))
+                updates += 1
         
-        print(f"连接到数据库: {DB_PATH}")
+        logger.info(f"已修复 {updates} 条会话日期记录")
         
-        # 获取当前时间
-        current_time = datetime.now().isoformat()
+        # 查询并修复messages表中的timestamp字段
+        logger.info("修复messages表中的timestamp字段...")
+        cursor.execute("SELECT id, timestamp FROM messages")
+        messages = cursor.fetchall()
         
-        # 查看数据库中的日期
-        cursor.execute("SELECT id, start_time, last_update FROM conversations")
-        for row in cursor.fetchall():
-            print(f"会话 {row['id']}: start_time={row['start_time']}, last_update={row['last_update']}")
+        updates = 0
+        for msg in messages:
+            if msg['timestamp'] and ' ' in msg['timestamp']:
+                new_date = msg['timestamp'].replace(' ', 'T')
+                cursor.execute("UPDATE messages SET timestamp = ? WHERE id = ?", (new_date, msg['id']))
+                updates += 1
         
-        # 修复会话表中的日期
-        cursor.execute("""
-            UPDATE conversations 
-            SET start_time = ?, 
-                last_update = ?
-        """, (current_time, current_time))
+        logger.info(f"已修复 {updates} 条消息日期记录")
         
-        affected_rows = cursor.rowcount
-        print(f"修复了 {affected_rows} 条会话记录的日期")
-        
-        # 修复消息表中的日期
-        cursor.execute("""
-            UPDATE messages 
-            SET timestamp = ?
-        """, (current_time,))
-        
-        affected_rows = cursor.rowcount
-        print(f"修复了 {affected_rows} 条消息记录的日期")
-        
-        # 提交更改
         conn.commit()
+        logger.info("日期修复完成")
         
-        # 检查是否还有未来日期
-        cursor.execute("SELECT id, start_time, last_update FROM conversations")
-        future_dates = 0
-        for row in cursor.fetchall():
-            print(f"修复后会话 {row['id']}: start_time={row['start_time']}, last_update={row['last_update']}")
-            try:
-                start_time = datetime.fromisoformat(row['start_time'].replace(' ', 'T'))
-                if start_time > datetime.now():
-                    future_dates += 1
-            except:
-                pass
-        
-        if future_dates > 0:
-            print(f"警告: 仍有 {future_dates} 条会话记录含有未来日期")
-        else:
-            print("所有会话记录的日期已修复")
-        
-        cursor.execute("SELECT id, timestamp FROM messages LIMIT 5")
-        future_dates = 0
-        for row in cursor.fetchall():
-            print(f"消息 {row['id']}: timestamp={row['timestamp']}")
-            try:
-                timestamp = datetime.fromisoformat(row['timestamp'].replace(' ', 'T'))
-                if timestamp > datetime.now():
-                    future_dates += 1
-            except:
-                pass
-        
-        if future_dates > 0:
-            print(f"警告: 仍有 {future_dates} 条消息记录含有未来日期")
-        else:
-            print("所有消息记录的日期已修复")
-        
-        # 关闭连接
+    except sqlite3.Error as e:
+        logger.error(f"修复日期时出错: {e}")
+        conn.rollback()
+        sys.exit(1)
+    finally:
         conn.close()
-        print("数据库连接已关闭")
-        
-    except Exception as e:
-        print(f"修复日期时出错: {e}")
 
 if __name__ == "__main__":
     fix_dates() 

@@ -171,6 +171,7 @@ export default function ConversationDetail() {
                 <Space>
                   <Button onClick={fetchConversation}>刷新</Button>
                   <Tag color="blue">{conversation.messages.length} 条消息</Tag>
+                  <Tag color="green">按时间顺序 (从新到旧)</Tag>
                 </Space>
               }
               style={{ marginBottom: 24 }}
@@ -179,7 +180,7 @@ export default function ConversationDetail() {
                 {conversation.messages && conversation.messages.length > 0 ? (
                   conversation.messages.map((msg: any, index: number) => (
                     <div 
-                      key={index}
+                      key={msg.id || index}
                       className={`message ${msg.role === 'user' ? 'message-user' : 'message-agent'}`}
                     >
                       <Space style={{ marginBottom: '4px' }}>

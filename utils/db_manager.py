@@ -8,7 +8,7 @@ import threading
 class DatabaseManager:
     """SQLite3数据库管理类，用于存储闲鱼消息记录"""
     
-    def __init__(self, db_path="data/xianyu_messages.db"):
+    def __init__(self, db_path="data/chat_history.db"):
         """初始化数据库连接"""
         # 确保数据目录存在
         os.makedirs(os.path.dirname(db_path), exist_ok=True)

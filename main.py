@@ -472,8 +472,8 @@ if __name__ == '__main__':
     xianyuLive = XianyuLive(cookies_str)
     
     try:
-        # 常驻进程
-        asyncio.run(xianyuLive.main())
+    # 常驻进程
+    asyncio.run(xianyuLive.main())
     except KeyboardInterrupt:
         # 优雅关闭
         logger.info("程序正在关闭...")

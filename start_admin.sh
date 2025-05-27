@@ -47,7 +47,7 @@ echo "前端服务已启动 (PID: $FRONTEND_PID)"
 
 echo ""
 echo "管理后台已启动!"
-echo "API服务: http://localhost:8000"
+echo "API服务: http://localhost:8090"
 echo "前端界面: http://localhost:3000"
 echo ""
 echo "按 Ctrl+C 停止所有服务"

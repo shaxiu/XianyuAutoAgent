@@ -164,7 +164,7 @@ https://github.com/cv-cat/XianYuApis
 您的☕和⭐将助力项目持续更新：
 
 <div align="center">
-  <img src="./images/wechat_pay.jpg" width="400px" alt="微信赞赏码"> 
+  <img src="./images/wechat_pay.jpg" width="400px" alt="微信赞赏码"> 
   <img src="./images/alipay.jpg" width="400px" alt="支付宝收款码">
 </div>
 

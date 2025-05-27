@@ -3,20 +3,53 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import sys
 import logging
+import threading
+import time
+
+# 配置详细日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger('admin_api')
+logger.info("启动API服务器...")
 
 # 添加项目根目录到系统路径
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, '../..'))
+sys.path.append(project_root)
+logger.info(f"项目根目录: {project_root}")
+logger.info(f"Python路径: {sys.path}")
 
 # 导入项目中的模块
 try:
-    from context_manager import ConversationManager
+    logger.info("尝试导入项目模块...")
     from utils.db_manager import DatabaseManager
-except ImportError:
-    print("无法导入项目模块，请确保路径正确")
+    logger.info("成功导入 DatabaseManager")
+    try:
+        from context_manager import ConversationManager
+        logger.info("成功导入 ConversationManager")
+    except ImportError as e:
+        logger.warning(f"导入 ConversationManager 失败: {e}，但这可能不是必需的")
+    
+    try:
+        from utils.session_manager import SessionManager
+        logger.info("成功导入 SessionManager")
+    except ImportError as e:
+        logger.warning(f"导入 SessionManager 失败: {e}，但将在需要时创建")
+except ImportError as e:
+    logger.error(f"无法导入项目模块: {e}")
+    logger.error("请确保路径正确，当前路径设置为:")
+    for path in sys.path:
+        logger.error(f" - {path}")
+    raise
 
 app = FastAPI(title="闲鱼AutoAgent管理后台API")
 
@@ -30,7 +63,9 @@ app.add_middleware(
 )
 
 # 初始化数据库管理器
-db_manager = DatabaseManager()
+db_path = os.path.join(project_root, "data", "chat_history.db")
+logger.info(f"使用数据库: {db_path}")
+db_manager = DatabaseManager(db_path=db_path)
 
 # 用户设置
 settings = {
@@ -49,19 +84,89 @@ settings = {
     }
 }
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.path.join(os.path.dirname(__file__), '../../logs/api.log'), 'a')
-    ]
-)
-logger = logging.getLogger('admin_api')
-
 # 确保日志目录存在
 os.makedirs(os.path.join(os.path.dirname(__file__), '../../logs'), exist_ok=True)
+
+# 添加定时任务相关代码
+class BackgroundTasks:
+    """后台任务管理器"""
+    
+    def __init__(self):
+        self.tasks = {}
+        self.stop_event = threading.Event()
+    
+    def start_task(self, task_name, func, interval_seconds, *args, **kwargs):
+        """
+        启动一个定时任务
+        
+        Args:
+            task_name: 任务名称
+            func: 要执行的函数
+            interval_seconds: 执行间隔（秒）
+            args, kwargs: 传递给函数的参数
+        """
+        if task_name in self.tasks:
+            logger.warning(f"任务 {task_name} 已存在，先停止旧任务")
+            self.stop_task(task_name)
+        
+        def task_wrapper():
+            while not self.stop_event.is_set():
+                try:
+                    logger.info(f"执行定时任务: {task_name}")
+                    result = func(*args, **kwargs)
+                    logger.info(f"任务 {task_name} 执行结果: {result}")
+                except Exception as e:
+                    logger.error(f"任务 {task_name} 执行出错: {e}")
+                
+                # 等待下一次执行，同时检查是否应该停止
+                for _ in range(int(interval_seconds)):
+                    if self.stop_event.is_set():
+                        break
+                    time.sleep(1)
+        
+        thread = threading.Thread(target=task_wrapper, daemon=True)
+        thread.start()
+        
+        self.tasks[task_name] = {
+            "thread": thread,
+            "interval": interval_seconds,
+            "function": func,
+            "args": args,
+            "kwargs": kwargs
+        }
+        
+        logger.info(f"已启动定时任务: {task_name}, 间隔: {interval_seconds}秒")
+        return True
+    
+    def stop_task(self, task_name):
+        """停止指定的定时任务"""
+        if task_name in self.tasks:
+            # 我们不能直接停止线程，但可以通过标志位让它自行退出
+            # 这里简单处理，只从任务列表中移除
+            del self.tasks[task_name]
+            logger.info(f"已停止任务: {task_name}")
+            return True
+        return False
+    
+    def stop_all(self):
+        """停止所有定时任务"""
+        self.stop_event.set()
+        self.tasks.clear()
+        logger.info("已停止所有定时任务")
+    
+    def list_tasks(self):
+        """列出所有定时任务"""
+        return {
+            name: {
+                "interval": task["interval"],
+                "function": task["function"].__name__,
+                "running": task["thread"].is_alive()
+            }
+            for name, task in self.tasks.items()
+        }
+
+# 创建后台任务管理器实例
+background_tasks = BackgroundTasks()
 
 @app.get("/")
 async def root():
@@ -154,14 +259,32 @@ async def get_conversations(limit: int = 10, offset: int = 0):
             """, (conv["id"],))
             
             recent_messages = []
+            latest_timestamp = None
+            
             for msg in cursor.fetchall():
-                recent_messages.append({
+                message_data = {
                     "id": msg["id"],
                     "role": msg["role"],
                     "content": msg["content"],
                     "timestamp": msg["timestamp"],
                     "intent": msg["intent"]
-                })
+                }
+                recent_messages.append(message_data)
+                
+                # 记录最新消息的时间戳
+                if latest_timestamp is None or msg["timestamp"] > latest_timestamp:
+                    latest_timestamp = msg["timestamp"]
+            
+            # 如果有消息，用最新消息的时间戳更新会话的 last_update
+            if latest_timestamp and latest_timestamp != conv['last_update']:
+                # 更新数据库中的last_update字段
+                cursor.execute(
+                    "UPDATE conversations SET last_update = ? WHERE id = ?",
+                    (latest_timestamp, conv['id'])
+                )
+                conn.commit()
+                # 同时更新当前返回数据中的last_update
+                conv['last_update'] = latest_timestamp
             
             # 获取意图统计
             cursor.execute("""
@@ -191,6 +314,9 @@ async def get_conversations(limit: int = 10, offset: int = 0):
                 "recent_messages": recent_messages,
                 "intent_stats": intent_stats
             })
+        
+        # 按会话的last_update时间倒序排序，确保最新的会话显示在前面
+        conversations.sort(key=lambda x: x["last_update"] if x["last_update"] else "", reverse=True)
         
         return {
             "total": total,
@@ -239,7 +365,7 @@ async def get_conversation(conv_id: str):
                 SELECT id, role, content, timestamp, intent
                 FROM messages
                 WHERE conversation_id = ?
-                ORDER BY timestamp
+                ORDER BY timestamp DESC
             """, (conversation["id"],))
             
             messages = []
@@ -356,10 +482,43 @@ async def send_message(conv_id: str, message: str = Body(..., embed=True)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"发送消息失败: {str(e)}")
 
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时执行的操作"""
+    logger.info("启动API服务器...")
+    
+    # 启动定时任务：每小时自动更新会话状态
+    try:
+        # 定义自动更新函数
+        def auto_update_session_status():
+            try:
+                from utils.session_manager import SessionManager
+                session_manager = SessionManager(db_path=db_manager.db_path)
+                updated_count = session_manager.mark_inactive_sessions_completed(hours=1)
+                return updated_count
+            except ImportError:
+                # 如果无法导入，使用API端点的实现
+                return update_session_status._raw_fn(hours=1)
+        
+        # 启动定时任务，每小时执行一次
+        background_tasks.start_task(
+            "auto_update_session_status",
+            auto_update_session_status,
+            interval_seconds=3600  # 1小时
+        )
+        logger.info("已启动会话状态自动更新任务")
+    except Exception as e:
+        logger.error(f"启动定时任务失败: {e}")
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时执行的操作"""
+    # 停止所有定时任务
+    background_tasks.stop_all()
+    
+    # 关闭数据库连接
     db_manager.close()
+    logger.info("API服务器已关闭")
 
 @app.get("/debug/messages")
 async def debug_messages():
@@ -674,6 +833,132 @@ async def reset_test_data():
         logger.error(f"重置测试数据失败: {e}")
         raise HTTPException(status_code=500, detail=f"重置测试数据失败: {str(e)}")
 
+@app.post("/update_session_status")
+async def update_session_status(hours: float = 1.0):
+    """
+    将指定时间内未更新的活跃会话标记为已完成
+    
+    Args:
+        hours: 未更新的小时数，默认为1小时
+    """
+    try:
+        # 导入或创建会话管理器
+        try:
+            from utils.session_manager import SessionManager
+            # 使用导入的会话管理器
+            session_manager = SessionManager(db_path=db_manager.db_path)
+            updated_count = session_manager.mark_inactive_sessions_completed(hours)
+        except ImportError:
+            # 如果无法导入，则在当前文件中定义简化版的函数
+            logger.warning("无法导入SessionManager，使用简化版函数")
+            
+            def mark_inactive_sessions_completed(db_connection, hours=1):
+                cursor = db_connection.cursor()
+                cutoff_time = (datetime.now() - timedelta(hours=hours)).isoformat()
+                
+                # 查找所有需要更新的会话
+                cursor.execute(
+                    """
+                    SELECT id, user_id, item_id, last_update 
+                    FROM conversations 
+                    WHERE status = 'active' AND datetime(last_update) < datetime(?) 
+                    """,
+                    (cutoff_time,)
+                )
+                
+                inactive_sessions = cursor.fetchall()
+                
+                if not inactive_sessions:
+                    logger.info(f"没有找到超过{hours}小时未更新的活跃会话")
+                    return 0
+                
+                # 更新会话状态
+                session_ids = [session['id'] for session in inactive_sessions]
+                placeholders = ', '.join(['?' for _ in session_ids])
+                
+                cursor.execute(
+                    f"""
+                    UPDATE conversations 
+                    SET status = 'completed' 
+                    WHERE id IN ({placeholders})
+                    """,
+                    session_ids
+                )
+                
+                db_connection.commit()
+                return len(inactive_sessions)
+            
+            # 使用简化版函数
+            updated_count = mark_inactive_sessions_completed(db_manager.connection, hours)
+        
+        # 获取更新后的统计信息
+        conn = db_manager.connection
+        cursor = conn.cursor()
+        
+        # 获取总会话数
+        cursor.execute("SELECT COUNT(*) FROM conversations")
+        total = cursor.fetchone()[0]
+        
+        # 获取已完成会话数
+        cursor.execute("SELECT COUNT(*) FROM conversations WHERE status = 'completed'")
+        completed = cursor.fetchone()[0]
+        
+        return {
+            "message": f"已将 {updated_count} 个超过 {hours} 小时未更新的会话标记为已完成",
+            "updated_count": updated_count,
+            "total_conversations": total,
+            "completed_conversations": completed
+        }
+    except Exception as e:
+        logger.error(f"更新会话状态时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"更新会话状态失败: {str(e)}")
+
+# 添加管理定时任务的API端点
+@app.get("/tasks")
+async def get_tasks():
+    """获取所有定时任务"""
+    return {"tasks": background_tasks.list_tasks()}
+
+@app.post("/tasks/{task_name}/start")
+async def start_task(task_name: str, interval_seconds: int = 3600):
+    """
+    启动指定的定时任务
+    
+    Args:
+        task_name: 任务名称
+        interval_seconds: 执行间隔（秒）
+    """
+    if task_name == "update_session_status":
+        # 定义自动更新函数，不使用异步调用
+        def auto_update_session_status():
+            try:
+                # 直接使用会话管理器
+                from utils.session_manager import SessionManager
+                session_manager = SessionManager(db_path=db_manager.db_path)
+                updated_count = session_manager.mark_inactive_sessions_completed(hours=1)
+                return updated_count
+            except Exception as e:
+                logger.error(f"执行会话状态更新失败: {e}")
+                return 0
+        
+        success = background_tasks.start_task(
+            task_name,
+            auto_update_session_status,
+            interval_seconds
+        )
+        return {"success": success, "message": f"已启动任务: {task_name}"}
+    else:
+        raise HTTPException(status_code=400, detail=f"未知的任务: {task_name}")
+
+@app.post("/tasks/{task_name}/stop")
+async def stop_task(task_name: str):
+    """停止指定的定时任务"""
+    success = background_tasks.stop_task(task_name)
+    if success:
+        return {"success": True, "message": f"已停止任务: {task_name}"}
+    else:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_name}")
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8090) 
