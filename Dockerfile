@@ -1,70 +1,38 @@
-FROM python:3.10-alpine AS builder
+FROM python:3.8
 
+# ---------------------------
+# 1. 设置国内Apt源，加速系统包安装
+# ---------------------------
+RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian stable main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian stable-updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security stable-security main contrib non-free" >> /etc/apt/sources.list && \
+    rm -rf /etc/apt/sources.list.d/* && \
+    apt-get update && \
+    apt-get install -y curl gnupg && \
+# ---------------------------
+# 2. 安装Node.js 18（官方推荐方式）
+# ---------------------------
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get install -y nodejs && \
+    node -v && npm -v && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------
+# 3. 用清华PyPI源加速pip，全局配置
+# ---------------------------
+RUN mkdir -p /root/.pip && \
+    echo '[global]\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple' > /root/.pip/pip.conf
+
+# 设置容器内工作目录
 WORKDIR /app
 
-# 只安装构建所需的依赖
-RUN apk add --no-cache --virtual .build-deps \
-    gcc \
-    musl-dev \
-    libffi-dev \
-    build-base \
-    curl
+# 复制所有项目文件到镜像
+COPY . .
 
-# 创建虚拟环境并安装依赖
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# ---------------------------
+# 4. 升级pip、安装Python依赖（走清华PyPI源）
+# ---------------------------
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# 复制依赖文件并安装
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 第二阶段：最终镜像
-FROM python:3.10-alpine
-
-# 添加元数据标签
-LABEL maintainer="coderxiu<coderxiu@qq.com>"
-LABEL description="闲鱼AI客服机器人"
-LABEL version="1.0"
-
-# 设置时区和编码
-ENV TZ=Asia/Shanghai \
-    PYTHONIOENCODING=utf-8 \
-    LANG=C.UTF-8 \
-    PATH="/opt/venv/bin:$PATH" \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# 只安装运行时必要的包
-RUN apk add --no-cache \
-    tzdata \
-    nodejs \
-    npm \
-    && npm install -g npm@10.2.4 \
-    && npm cache clean --force \
-    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo Asia/Shanghai > /etc/timezone \
-    # 减小apk缓存
-    && rm -rf /var/cache/apk/*
-
-# 设置工作目录
-WORKDIR /app
-
-# 从构建阶段复制虚拟环境
-COPY --from=builder /opt/venv /opt/venv
-
-# 创建必要的目录
-RUN mkdir -p data prompts
-
-# 复制示例提示词文件并重命名为正式文件
-COPY prompts/classify_prompt.txt prompts/classify_prompt.txt
-COPY prompts/price_prompt.txt prompts/price_prompt.txt
-COPY prompts/tech_prompt.txt prompts/tech_prompt.txt
-COPY prompts/default_prompt.txt prompts/default_prompt.txt
-
-# 只复制绝对必要的文件
-COPY main.py XianyuAgent.py XianyuApis.py context_manager.py ./
-COPY utils/ utils/
-COPY static/ static/
-
-# 容器启动时运行的命令
+# 启动主程序
 CMD ["python", "main.py"]
