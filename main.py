@@ -8,11 +8,9 @@ from loguru import logger
 from dotenv import load_dotenv
 from XianyuApis import XianyuApis
 
-
 from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, generate_device_id, decrypt
 from XianyuAgent import XianyuReplyBot
 from context_manager import ChatContextManager
-
 
 class XianyuLive:
     def __init__(self, cookies_str):
@@ -20,14 +18,14 @@ class XianyuLive:
         self.base_url = 'wss://wss-goofish.dingtalk.com/'
         self.cookies_str = cookies_str
         self.cookies = trans_cookies(cookies_str)
-        self.xianyu.session.cookies.update(self.cookies)  # 直接使用 session.cookies.update
+        self.xianyu.session.cookies.update(self.cookies)
         self.myid = self.cookies['unb']
         self.device_id = generate_device_id(self.myid)
         self.context_manager = ChatContextManager()
-        
-        # 心跳相关配置
-        self.heartbeat_interval = 15  # 心跳间隔15秒
-        self.heartbeat_timeout = 5    # 心跳超时5秒
+
+        # 心跳等
+        self.heartbeat_interval = 15
+        self.heartbeat_timeout = 5
         self.last_heartbeat_time = 0
         self.last_heartbeat_response = 0
         self.heartbeat_task = None
@@ -41,6 +39,25 @@ class XianyuLive:
         # 人工接管关键词，从环境变量读取
         self.toggle_keywords = os.getenv("TOGGLE_KEYWORDS", "。")
         logger.info(f"人工接管切换关键词为: {self.toggle_keywords}")
+
+    def is_blacklisted(self, content: str) -> bool:
+        """
+        实时读取同级目录hmd.txt，每行一个黑名单词，命中任意即True
+        """
+        try:
+            blacklist_keywords = []
+            with open("hmd.txt", "r", encoding="utf-8") as f:
+                for line in f:
+                    word = line.strip()
+                    if word:
+                        blacklist_keywords.append(word)
+            for word in blacklist_keywords:
+                if word.lower() in (content or "").lower():
+                    return True
+        except Exception as e:
+            # 没有hmd.txt则认为没有黑名单
+            logger.debug(f"hmd.txt读取异常: {e}")
+        return False
 
     async def send_msg(self, ws, cid, toid, text):
         text = {
@@ -105,7 +122,6 @@ class XianyuLive:
             }
         }
         await ws.send(json.dumps(msg))
-        # 等待一段时间，确保连接注册完成
         await asyncio.sleep(1)
         msg = {"lwp": "/r/SyncStatus/ackDiff", "headers": {"mid": "5701741704675979 0"}, "body": [
             {"pipeline": "sync", "tooLong2Tag": "PNM,1", "channel": "sync", "topic": "sync", "highPts": 0,
@@ -114,21 +130,19 @@ class XianyuLive:
         logger.info('连接注册完成')
 
     def is_chat_message(self, message):
-        """判断是否为用户聊天消息"""
         try:
             return (
-                isinstance(message, dict) 
-                and "1" in message 
-                and isinstance(message["1"], dict)  # 确保是字典类型
+                isinstance(message, dict)
+                and "1" in message
+                and isinstance(message["1"], dict)
                 and "10" in message["1"]
-                and isinstance(message["1"]["10"], dict)  # 确保是字典类型
+                and isinstance(message["1"]["10"], dict)
                 and "reminderContent" in message["1"]["10"]
             )
         except Exception:
             return False
 
     def is_sync_package(self, message_data):
-        """判断是否为同步包消息"""
         try:
             return (
                 isinstance(message_data, dict)
@@ -141,7 +155,6 @@ class XianyuLive:
             return False
 
     def is_typing_status(self, message):
-        """判断是否为用户正在输入状态消息"""
         try:
             return (
                 isinstance(message, dict)
@@ -210,7 +223,6 @@ class XianyuLive:
             return "manual"
 
     async def handle_message(self, message_data, websocket):
-        """处理所有类型的消息"""
         try:
 
             try:
@@ -232,28 +244,21 @@ class XianyuLive:
             except Exception as e:
                 pass
 
-            # 如果不是同步包消息，直接返回
             if not self.is_sync_package(message_data):
                 return
 
-            # 获取并解密数据
             sync_data = message_data["body"]["syncPushPackage"]["data"][0]
-            
-            # 检查是否有必要的字段
             if "data" not in sync_data:
                 logger.debug("同步包中无data字段")
                 return
 
-            # 解密数据
             try:
                 data = sync_data["data"]
                 try:
                     data = base64.b64decode(data).decode("utf-8")
                     data = json.loads(data)
-                    # logger.info(f"无需解密 message: {data}")
                     return
                 except Exception as e:
-                    # logger.info(f'加密数据: {data}')
                     decrypted_data = decrypt(data)
                     message = json.loads(decrypted_data)
             except Exception as e:
@@ -261,7 +266,6 @@ class XianyuLive:
                 return
 
             try:
-                # 判断是否为订单消息,需要自行编写付款后的逻辑
                 if message['3']['redReminder'] == '等待买家付款':
                     user_id = message['1'].split('@')[0]
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
@@ -277,38 +281,38 @@ class XianyuLive:
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
                     logger.info(f'交易成功 {user_url} 等待卖家发货')
                     return
-
             except:
                 pass
 
-            # 判断消息类型
             if self.is_typing_status(message):
-                logger.debug("用户正在输入")
                 return
             elif not self.is_chat_message(message):
-                logger.debug("其他非聊天消息")
-                logger.debug(f"原始消息: {message}")
                 return
 
-            # 处理聊天消息
             create_time = int(message["1"]["5"])
             send_user_name = message["1"]["10"]["reminderTitle"]
             send_user_id = message["1"]["10"]["senderUserId"]
             send_message = message["1"]["10"]["reminderContent"]
-            
-            # 时效性验证（过滤5分钟前消息）
+
+            # ----------这里: 实时黑名单拦截----------
+            if self.is_blacklisted(send_message):
+                logger.info(f"消息命中黑名单关键词，已忽略: {send_message}")
+                return
+
             if (time.time() * 1000 - create_time) > 300000:
                 logger.debug("过期消息丢弃")
                 return
-                
+
             # 获取商品ID和会话ID
             url_info = message["1"]["10"]["reminderUrl"]
             item_id = url_info.split("itemId=")[1].split("&")[0] if "itemId=" in url_info else None
             chat_id = message["1"]["2"].split('@')[0]
             
+
             if not item_id:
                 logger.warning("无法获取商品ID")
                 return
+
 
             # 检查是否为卖家（自己）发送的控制命令
             if send_user_id == self.myid:
@@ -346,15 +350,15 @@ class XianyuLive:
                 api_result = self.xianyu.get_item_info(item_id)
                 if 'data' in api_result and 'itemDO' in api_result['data']:
                     item_info = api_result['data']['itemDO']
-                    # 保存商品信息到数据库
                     self.context_manager.save_item_info(item_id, item_info)
                 else:
                     logger.warning(f"获取商品信息失败: {api_result}")
                     return
             else:
                 logger.info(f"从数据库获取商品信息: {item_id}")
-                
+
             item_description = f"{item_info['desc']};当前商品售卖价格为:{str(item_info['soldPrice'])}"
+
             
             # 获取完整的对话上下文
             context = self.context_manager.get_context_by_chat(chat_id)
@@ -364,12 +368,17 @@ class XianyuLive:
                 item_description,
                 context=context
             )
-            
-            # 检查是否为价格意图，如果是则增加议价次数
+
+            # ---------大模型返回为空不过滤-----------
+            if not bot_reply or str(bot_reply).strip() == "":
+                logger.info("大模型返回结果为空，不回复")
+                return
+
             if bot.last_intent == "price":
                 self.context_manager.increment_bargain_count_by_chat(chat_id)
                 bargain_count = self.context_manager.get_bargain_count_by_chat(chat_id)
                 logger.info(f"用户 {send_user_name} 对商品 {item_id} 的议价次数: {bargain_count}")
+
             
             # 添加机器人回复到上下文
             self.context_manager.add_message_by_chat(chat_id, self.myid, item_id, "assistant", bot_reply)
@@ -382,7 +391,6 @@ class XianyuLive:
             logger.debug(f"原始消息: {message_data}")
 
     async def send_heartbeat(self, ws):
-        """发送心跳包并等待响应"""
         try:
             heartbeat_mid = generate_mid()
             heartbeat_msg = {
@@ -400,27 +408,20 @@ class XianyuLive:
             raise
 
     async def heartbeat_loop(self, ws):
-        """心跳维护循环"""
         while True:
             try:
                 current_time = time.time()
-                
-                # 检查是否需要发送心跳
                 if current_time - self.last_heartbeat_time >= self.heartbeat_interval:
                     await self.send_heartbeat(ws)
-                
-                # 检查上次心跳响应时间，如果超时则认为连接已断开
                 if (current_time - self.last_heartbeat_response) > (self.heartbeat_interval + self.heartbeat_timeout):
                     logger.warning("心跳响应超时，可能连接已断开")
                     break
-                
                 await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"心跳循环出错: {e}")
                 break
 
     async def handle_heartbeat_response(self, message_data):
-        """处理心跳响应"""
         try:
             if (
                 isinstance(message_data, dict)
@@ -454,23 +455,15 @@ class XianyuLive:
                 async with websockets.connect(self.base_url, extra_headers=headers) as websocket:
                     self.ws = websocket
                     await self.init(websocket)
-                    
-                    # 初始化心跳时间
                     self.last_heartbeat_time = time.time()
                     self.last_heartbeat_response = time.time()
-                    
-                    # 启动心跳任务
                     self.heartbeat_task = asyncio.create_task(self.heartbeat_loop(websocket))
-                    
+
                     async for message in websocket:
                         try:
                             message_data = json.loads(message)
-                            
-                            # 处理心跳响应
                             if await self.handle_heartbeat_response(message_data):
                                 continue
-                            
-                            # 发送通用ACK响应
                             if "headers" in message_data and "mid" in message_data["headers"]:
                                 ack = {
                                     "code": 200,
@@ -479,15 +472,11 @@ class XianyuLive:
                                         "sid": message_data["headers"].get("sid", "")
                                     }
                                 }
-                                # 复制其他可能的header字段
                                 for key in ["app-key", "ua", "dt"]:
                                     if key in message_data["headers"]:
                                         ack["headers"][key] = message_data["headers"][key]
                                 await websocket.send(json.dumps(ack))
-                            
-                            # 处理其他消息
                             await self.handle_message(message_data, websocket)
-                                
                         except json.JSONDecodeError:
                             logger.error("消息解析失败")
                         except Exception as e:
@@ -502,8 +491,7 @@ class XianyuLive:
                         await self.heartbeat_task
                     except asyncio.CancelledError:
                         pass
-                await asyncio.sleep(5)  # 等待5秒后重连
-                
+                await asyncio.sleep(5)
             except Exception as e:
                 logger.error(f"连接发生错误: {e}")
                 if self.heartbeat_task:
@@ -512,14 +500,11 @@ class XianyuLive:
                         await self.heartbeat_task
                     except asyncio.CancelledError:
                         pass
-                await asyncio.sleep(5)  # 等待5秒后重连
-
+                await asyncio.sleep(5)
 
 if __name__ == '__main__':
-    #加载环境变量 cookie
     load_dotenv()
     cookies_str = os.getenv("COOKIES_STR")
     bot = XianyuReplyBot()
     xianyuLive = XianyuLive(cookies_str)
-    # 常驻进程
     asyncio.run(xianyuLive.main())
