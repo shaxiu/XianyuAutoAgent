@@ -86,6 +86,19 @@ COOKIES_STR自行在闲鱼网页端获取cookies(网页端F12打开控制台，�
 python main.py
 ```
 
+#### Cookie获取方法
+
+1. 在浏览器中打开[咸鱼](https://www.goofish.com/)并登录。
+2. 按F12打开开发者工具。
+3. 然后刷新页面
+4. 打开开发者工具的Network页，筛选Fetch/XHR类型的请求。
+5. 在左边随便点击一个请求，在右边弹出的框中选择Headers，下滑找到Cookie，复制填写到.env即可。
+<div align="center">
+  <img src="https://img.picui.cn/free/2025/05/16/6826a5733fca3.png" width="600" alt="获取cookie"> 
+  <br>
+  <em>获取cookie</em>
+</div>
+
 ### 自定义提示词
 
 可以通过编辑 `prompts` 目录下的文件来自定义各个专家的提示词：
