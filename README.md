@@ -57,7 +57,7 @@
 ```bash
 1. 克隆仓库
 git clone https://github.com/shaxiu/XianyuAutoAgent.git
-cd xianyu-autoagent
+cd XianyuAutoAgent
 
 2. 安装依赖
 pip install -r requirements.txt
@@ -120,12 +120,12 @@ https://github.com/cv-cat/XianYuApis
 <div align="center">
   <table>
     <tr>
-      <td align="center"><strong>交流群4（已满200）</strong></td>
-      <td align="center"><strong>交流群5（推荐加入）</strong></td>
+      <td align="center"><strong>交流群5（已满200）</strong></td>
+      <td align="center"><strong>交流群6（推荐加入）</strong></td>
     </tr>
     <tr>
-      <td><img src="./images/wx_group4.png" width="300px" alt="交流群1"></td>
-      <td><img src="./images/wx_group5.png" width="300px" alt="交流群2"></td>
+      <td><img src="./images/wx_group6.png" width="300px" alt="交流群1"></td>
+      <td><img src="./images/wx_group7.png" width="300px" alt="交流群2"></td>
     </tr>
   </table>
 </div>
