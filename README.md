@@ -107,7 +107,7 @@ python main.py
 
 鉴于项目的特殊性，开发团队可能在任何时间**停止更新**或**删除项目**。
 
-如需学习交流，请联系：[coderxiu@qq.com](https://mailto:coderxiu@qq.com/)
+如需学习交流，请联系：[coderxiu@qq.com](mailto:coderxiu@qq.com/)
 
 ## 🧸特别鸣谢
 本项目参考了以下开源项目：
