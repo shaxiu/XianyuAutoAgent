@@ -52,3 +52,6 @@ htmlcov/
 .nox/
 .hypothesis/
 .coverage.* 
+
+#venv虚拟环境
+.venv/
