@@ -148,7 +148,7 @@ class XianyuApis:
                 logger.error("重新登录失败，Cookie已失效")
                 logger.error("🔴 程序即将退出，请更新.env文件中的COOKIES_STR后重新启动")
                 sys.exit(1)  # 直接退出程序
-            
+
         params = {
             'jsv': '2.7.2',
             'appKey': '34839810',
@@ -167,17 +167,24 @@ class XianyuApis:
         data = {
             'data': data_val,
         }
-        
+
         # 简单获取token，信任cookies已清理干净
         token = self.session.cookies.get('_m_h5_tk', '').split('_')[0]
-        
+
+        # 🔧 调试信息：显示当前cookies状态
+        logger.debug(f"[调试] 重试次数: {retry_count}, _m_h5_tk token: {token[:20] if token else 'None'}...")
+        logger.debug(f"[调试] 关键cookies: cna={self.session.cookies.get('cna', 'Missing')[:10]}..., cookie2={self.session.cookies.get('cookie2', 'Missing')[:10]}...")
+
         sign = generate_sign(params['t'], token, data_val)
         params['sign'] = sign
-        
+
         try:
             response = self.session.post('https://h5api.m.goofish.com/h5/mtop.taobao.idlemessage.pc.login.token/1.0/', params=params, data=data)
             res_json = response.json()
-            
+
+            # 🔧 调试信息：显示完整响应
+            logger.debug(f"[调试] API响应: {res_json}")
+
             if isinstance(res_json, dict):
                 ret_value = res_json.get('ret', [])
                 # 检查ret是否包含成功信息
@@ -187,7 +194,11 @@ class XianyuApis:
                     if 'Set-Cookie' in response.headers:
                         logger.debug("检测到Set-Cookie，更新cookie")  # 降级为DEBUG并简化
                         self.clear_duplicate_cookies()
-                    time.sleep(0.5)
+
+                    # 🔧 增加等待时间，避免风控（从0.5秒增加到2-3秒）
+                    wait_time = 2 + retry_count  # 第一次重试等2秒，第二次等3秒
+                    logger.info(f"等待{wait_time}秒后重试...")
+                    time.sleep(wait_time)
                     return self.get_token(device_id, retry_count + 1)
                 else:
                     logger.info("Token获取成功")
