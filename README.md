@@ -75,6 +75,8 @@ TOGGLE_KEYWORDS=接管模式切换关键词，默认为句号（输入句号切�
 注意：默认使用的模型是通义千问，如需使用其他API，请自行修改.env文件中的模型地址和模型名称；
 COOKIES_STR自行在闲鱼网页端获取cookies(网页端F12打开控制台，选择Network，点击Fetch/XHR,点击一个请求，查看cookies)
 
+Tips: 可通过执行 `bash init_config.sh` 来一键创建配置文件
+
 4. 创建提示词文件prompts/*_prompt.txt（也可以直接将模板名称中的_example去掉）
 默认提供四个模板，可自行修改
 ```
