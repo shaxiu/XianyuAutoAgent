@@ -14,6 +14,7 @@ import random
 from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, generate_device_id, decrypt
 from XianyuAgent import XianyuReplyBot
 from context_manager import ChatContextManager
+from supabase_sync import get_sync
 
 
 class XianyuLive:
@@ -187,6 +188,7 @@ class XianyuLive:
              "pts": int(time.time() * 1000) * 1000, "seq": 0, "timestamp": int(time.time() * 1000)}]}
         await ws.send(json.dumps(msg))
         logger.info('连接注册完成')
+        get_sync().update_status("online")
 
     def is_chat_message(self, message):
         """判断是否为用户聊天消息"""
@@ -521,6 +523,9 @@ class XianyuLive:
             
             # 添加用户消息到上下文
             self.context_manager.add_message_by_chat(chat_id, send_user_id, item_id, "user", send_message)
+            # Sync user message to Supabase
+            item_title = item_info.get('title', '') if item_info else ''
+            get_sync().log_conversation(chat_id, item_id, item_title, "user", send_message)
             
             # 检查是否为价格意图，如果是则增加议价次数
             if bot.last_intent == "price":
@@ -530,6 +535,9 @@ class XianyuLive:
             
             # 添加机器人回复到上下文
             self.context_manager.add_message_by_chat(chat_id, self.myid, item_id, "assistant", bot_reply)
+            # Sync bot reply to Supabase
+            get_sync().log_conversation(chat_id, item_id, item_title, "assistant", bot_reply, intent=bot.last_intent)
+            get_sync().maybe_flush_logs()
             
             logger.info(f"机器人回复: {bot_reply}")
             
@@ -677,9 +685,11 @@ class XianyuLive:
 
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("WebSocket连接已关闭")
+                get_sync().update_status("offline")
                 
             except Exception as e:
                 logger.error(f"连接发生错误: {e}")
+                get_sync().update_status("offline")
                 
             finally:
                 # 清理任务
@@ -757,6 +767,20 @@ if __name__ == '__main__':
     if os.path.exists(".env.example"):
         load_dotenv(".env.example")  # 不会覆盖已存在的变量
         logger.info("已加载 .env.example 默认配置")
+
+    # Try to load config from Supabase (overrides .env)
+    sync = get_sync()
+    cloud_config = sync.get_account_config()
+    if cloud_config:
+        if cloud_config.get("cookies_str"):
+            os.environ["COOKIES_STR"] = cloud_config["cookies_str"]
+        if cloud_config.get("api_key"):
+            os.environ["API_KEY"] = cloud_config["api_key"]
+        if cloud_config.get("model_base_url"):
+            os.environ["MODEL_BASE_URL"] = cloud_config["model_base_url"]
+        if cloud_config.get("model_name"):
+            os.environ["MODEL_NAME"] = cloud_config["model_name"]
+        logger.info("Loaded config from Supabase")
     
     # 配置日志级别
     log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
@@ -766,6 +790,15 @@ if __name__ == '__main__':
         level=log_level,
         format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
     )
+
+    # Add Supabase log sink for WARNING+ levels
+    def supabase_log_sink(message):
+        record = message.record
+        if record["level"].no >= 30:  # WARNING = 30, ERROR = 40
+            level = "ERROR" if record["level"].no >= 40 else "WARNING"
+            get_sync().buffer_log(level, str(message).strip())
+
+    logger.add(supabase_log_sink, level="WARNING")
     logger.info(f"日志级别设置为: {log_level}")
     
     # 交互式检查并补全配置
