@@ -28,37 +28,38 @@ class XianyuReplyBot:
         }
 
     def _init_system_prompts(self):
-        """初始化各Agent专用提示词，优先加载用户自定义文件，否则使用Example默认文件"""
+        """Load prompts: Supabase > local files > example files"""
+        from supabase_sync import get_sync
+        cloud_prompts = get_sync().get_prompts()
+
         prompt_dir = "prompts"
-        
-        def load_prompt_content(name: str) -> str:
-            """尝试加载提示词文件"""
-            # 优先尝试加载 target.txt
+
+        def load_prompt_content(name: str, prompt_type: str) -> str:
+            # Check cloud first
+            if cloud_prompts.get(prompt_type):
+                logger.debug(f"Loaded {prompt_type} prompt from Supabase, length: {len(cloud_prompts[prompt_type])}")
+                return cloud_prompts[prompt_type]
+
+            # Fall back to local files
             target_path = os.path.join(prompt_dir, f"{name}.txt")
             if os.path.exists(target_path):
                 file_path = target_path
             else:
-                # 尝试默认提示词 target_example.txt
                 file_path = os.path.join(prompt_dir, f"{name}_example.txt")
 
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-                logger.debug(f"已加载 {name} 提示词，路径: {file_path}, 长度: {len(content)} 字符")
+                logger.debug(f"Loaded {name} prompt from file: {file_path}, length: {len(content)}")
                 return content
 
         try:
-            # 加载分类提示词
-            self.classify_prompt = load_prompt_content("classify_prompt")
-            # 加载价格提示词
-            self.price_prompt = load_prompt_content("price_prompt")
-            # 加载技术提示词
-            self.tech_prompt = load_prompt_content("tech_prompt")
-            # 加载默认提示词
-            self.default_prompt = load_prompt_content("default_prompt")
-                
-            logger.info("成功加载所有提示词")
+            self.classify_prompt = load_prompt_content("classify_prompt", "classify")
+            self.price_prompt = load_prompt_content("price_prompt", "price")
+            self.tech_prompt = load_prompt_content("tech_prompt", "tech")
+            self.default_prompt = load_prompt_content("default_prompt", "default")
+            logger.info("All prompts loaded successfully")
         except Exception as e:
-            logger.error(f"加载提示词时出错: {e}")
+            logger.error(f"Error loading prompts: {e}")
             raise
 
     def _safe_filter(self, text: str) -> str:
