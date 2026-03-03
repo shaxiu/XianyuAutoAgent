@@ -56,6 +56,7 @@ export default function SettingsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         account_id: accountId,
+        name: config.name,
         cookies_str: config.cookies_str,
         api_key: config.api_key,
         model_base_url: config.model_base_url,
@@ -100,6 +101,14 @@ export default function SettingsPage() {
               <CardTitle>Account Config</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div>
+                <Label>Account Name</Label>
+                <Input
+                  value={config.name}
+                  onChange={(e) => setConfig({ ...config, name: e.target.value })}
+                  placeholder="e.g. My Shop"
+                />
+              </div>
               <div>
                 <Label>API Key</Label>
                 <Input

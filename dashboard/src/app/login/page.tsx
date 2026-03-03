@@ -32,7 +32,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-center">Xianyu Dashboard</CardTitle>

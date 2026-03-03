@@ -74,19 +74,19 @@ export default function DashboardPage() {
                   <p className="text-2xl font-bold">
                     {stats[account.id]?.totalMessages ?? "-"}
                   </p>
-                  <p className="text-sm text-gray-500">Total Messages</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Total Messages</p>
                 </div>
                 <div>
                   <p className="text-2xl font-bold">
                     {stats[account.id]?.todayMessages ?? "-"}
                   </p>
-                  <p className="text-sm text-gray-500">Today</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Today</p>
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-red-500">
                     {stats[account.id]?.errorCount ?? "-"}
                   </p>
-                  <p className="text-sm text-gray-500">Errors</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Errors</p>
                 </div>
               </div>
             </CardContent>

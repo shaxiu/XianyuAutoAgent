@@ -69,14 +69,14 @@ export default function ConversationsPage() {
           {chatGroups.map((group) => (
             <Card
               key={group.chat_id}
-              className={`cursor-pointer hover:bg-gray-50 ${
+              className={`cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${
                 selectedChat === group.chat_id ? "ring-2 ring-blue-500" : ""
               }`}
               onClick={() => setSelectedChat(group.chat_id)}
             >
               <CardContent className="p-3">
                 <p className="font-medium text-sm truncate">{group.item_title}</p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
                   {group.messages.length} messages
                 </p>
                 <p className="text-xs text-gray-400">
@@ -108,7 +108,7 @@ export default function ConversationsPage() {
                       className={`max-w-[70%] rounded-lg px-3 py-2 ${
                         msg.role === "assistant"
                           ? "bg-blue-500 text-white"
-                          : "bg-gray-100"
+                          : "bg-gray-100 dark:bg-gray-800"
                       }`}
                     >
                       <p className="text-sm">{msg.content}</p>

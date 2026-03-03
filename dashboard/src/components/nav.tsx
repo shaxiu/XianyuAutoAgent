@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const links = [
   { href: "/", label: "Dashboard" },
@@ -21,9 +22,9 @@ export function Nav() {
   }
 
   return (
-    <nav className="border-b bg-white px-6 py-3 flex items-center justify-between">
+    <nav className="border-b bg-white dark:bg-gray-900 dark:border-gray-800 px-6 py-3 flex items-center justify-between">
       <div className="flex items-center gap-6">
-        <span className="font-bold text-lg">Xianyu Monitor</span>
+        <span className="font-bold text-lg dark:text-white">Xianyu Monitor</span>
         <div className="flex gap-2">
           {links.map((link) => (
             <Link key={link.href} href={link.href}>
@@ -37,9 +38,12 @@ export function Nav() {
           ))}
         </div>
       </div>
-      <Button variant="ghost" size="sm" onClick={handleLogout}>
-        Logout
-      </Button>
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
+        <Button variant="ghost" size="sm" onClick={handleLogout}>
+          Logout
+        </Button>
+      </div>
     </nav>
   );
 }
