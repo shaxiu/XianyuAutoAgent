@@ -88,6 +88,36 @@ class SupabaseSync:
             logger.error(f"Failed to fetch prompts: {e}")
             return {}
 
+    def get_latest_cookies(self) -> str:
+        """Fetch the latest cookies_str from Supabase for this account.
+        Returns empty string if disabled or error.
+        """
+        if not self.enabled:
+            return ""
+        try:
+            result = (
+                self.client.table("accounts")
+                .select("cookies_str")
+                .eq("id", self.account_id)
+                .single()
+                .execute()
+            )
+            return (result.data or {}).get("cookies_str", "")
+        except Exception as e:
+            logger.error(f"Failed to fetch cookies from Supabase: {e}")
+            return ""
+
+    def update_cookies(self, cookies_str: str):
+        """Update cookies_str in Supabase for this account."""
+        if not self.enabled:
+            return
+        try:
+            self.client.table("accounts").update(
+                {"cookies_str": cookies_str}
+            ).eq("id", self.account_id).execute()
+        except Exception as e:
+            logger.error(f"Failed to update cookies in Supabase: {e}")
+
     def update_status(self, status: str):
         """Update account status: online, offline, error"""
         if not self.enabled:
