@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>闲鱼自动回复助手 - 设置</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; font-size: 14px; color: #333; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 24px; }
+    .section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+    .section h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: #333; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+    .form-group input[type="text"], .form-group input[type="password"], .form-group input[type="number"] {
+      width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; font-family: monospace;
+    }
+    .form-group input:focus { outline: none; border-color: #4CAF50; }
+    .input-row { display: flex; gap: 8px; align-items: center; }
+    .input-row input { flex: 1; }
+    .input-row span { font-size: 12px; color: #999; white-space: nowrap; }
+    .password-wrap { display: flex; gap: 8px; }
+    .password-wrap input { flex: 1; }
+    .password-wrap button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: white; cursor: pointer; font-size: 12px; white-space: nowrap; }
+    .toggle-row { display: flex; align-items: center; gap: 12px; }
+    .toggle-row label.switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+    .toggle-row label.switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-row .slider { position: absolute; cursor: pointer; inset: 0; background: #ccc; border-radius: 22px; transition: 0.3s; }
+    .toggle-row .slider::before { content: ''; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }
+    .toggle-row input:checked + .slider { background: #4CAF50; }
+    .toggle-row input:checked + .slider::before { transform: translateX(18px); }
+    .note { font-size: 12px; color: #999; margin-bottom: 12px; }
+    .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+    .btn-save { background: #4CAF50; color: white; width: 100%; margin-top: 8px; }
+    .btn-save:hover { opacity: 0.9; }
+    .btn-outline { background: transparent; border: 1px solid #ddd; color: #666; margin-right: 8px; }
+    .btn-outline:hover { background: #f5f5f5; }
+    .status-msg { text-align: center; padding: 8px; font-size: 13px; margin-top: 8px; border-radius: 6px; }
+    .status-msg.success { color: #4CAF50; background: #E8F5E9; }
+    .status-msg.error { color: #F44336; background: #FFEBEE; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>闲鱼自动回复助手 - 设置</h1>
+
+    <div class="section">
+      <h2>LLM API 配置</h2>
+      <div class="form-group">
+        <label>API Key</label>
+        <div class="password-wrap">
+          <input type="password" id="apiKey" placeholder="sk-...">
+          <button class="toggle-visibility">显示</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Model Base URL</label>
+        <input type="text" id="modelBaseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+      </div>
+      <div class="form-group">
+        <label>Model Name</label>
+        <input type="text" id="modelName" placeholder="qwen-max">
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Supabase 配置</h2>
+      <div class="form-group">
+        <label>Supabase URL</label>
+        <input type="text" id="supabaseUrl" placeholder="https://xxx.supabase.co">
+      </div>
+      <div class="form-group">
+        <label>Supabase Key</label>
+        <div class="password-wrap">
+          <input type="password" id="supabaseKey" placeholder="eyJ...">
+          <button class="toggle-visibility">显示</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Account ID</label>
+        <input type="text" id="accountId" placeholder="your-account-id">
+      </div>
+      <div class="form-group">
+        <label>Dashboard URL</label>
+        <input type="text" id="dashboardUrl" placeholder="https://your-dashboard.vercel.app">
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>行为设置</h2>
+      <div class="form-group">
+        <div class="toggle-row">
+          <label class="switch">
+            <input type="checkbox" id="simulateTyping">
+            <span class="slider"></span>
+          </label>
+          <span>模拟人工打字</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>打字基础延迟 (ms)</label>
+        <div class="input-row">
+          <input type="number" id="typingDelayBaseMin" placeholder="0"> <span>~</span>
+          <input type="number" id="typingDelayBaseMax" placeholder="1000">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>每字符延迟 (ms)</label>
+        <div class="input-row">
+          <input type="number" id="typingDelayPerCharMin" placeholder="50"> <span>~</span>
+          <input type="number" id="typingDelayPerCharMax" placeholder="150">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>消息过期时间 (秒)</label>
+        <input type="number" id="messageExpireTime" placeholder="300">
+      </div>
+      <div class="form-group">
+        <label>手动接管超时 (秒)</label>
+        <input type="number" id="manualModeTimeout" placeholder="3600">
+      </div>
+      <div class="form-group">
+        <label>接管切换关键词</label>
+        <input type="text" id="toggleKeywords" placeholder="。">
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Prompt 管理</h2>
+      <p class="note">Prompt 在 Dashboard 中编辑管理</p>
+      <button class="btn btn-outline" id="openDashboard">打开 Dashboard</button>
+      <button class="btn btn-outline" id="refreshPrompts">刷新 Prompt 缓存</button>
+    </div>
+
+    <button class="btn btn-save" id="saveBtn">保存设置</button>
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
