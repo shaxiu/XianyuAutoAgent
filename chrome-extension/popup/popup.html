@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>闲鱼自动回复</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>闲鱼自动回复</h1>
+      <div class="status-dot" id="statusDot"></div>
+    </header>
+
+    <div class="toggle-section">
+      <label class="toggle">
+        <input type="checkbox" id="autoReplyToggle">
+        <span class="slider"></span>
+      </label>
+      <span id="toggleLabel">自动回复已关闭</span>
+    </div>
+
+    <div class="stats-section">
+      <h3>今日统计</h3>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <span class="stat-value" id="repliedCount">0</span>
+          <span class="stat-label">已回复</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" id="skippedCount">0</span>
+          <span class="stat-label">已跳过</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" id="errorCount">0</span>
+          <span class="stat-label">错误</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="info-section">
+      <div class="info-row">
+        <span class="info-label">账号 ID</span>
+        <span class="info-value" id="accountId">未设置</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">WebSocket</span>
+        <span class="info-value" id="wsStatus">未连接</span>
+      </div>
+    </div>
+
+    <div class="actions-section">
+      <button id="openDashboard" class="btn btn-primary">打开 Dashboard</button>
+      <button id="openOptions" class="btn btn-secondary">设置</button>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
