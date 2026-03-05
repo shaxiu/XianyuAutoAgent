@@ -8,12 +8,31 @@ from loguru import logger
 from dotenv import load_dotenv, set_key
 from XianyuApis import XianyuApis
 import sys
-import random
 
 
 from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, generate_device_id, decrypt
 from XianyuAgent import XianyuReplyBot
 from context_manager import ChatContextManager
+from core.action_executor import ActionExecutor
+from core.event_dedup import EventDedupStore
+from core.event_parser import parse_events
+from core.handlers.base import EventHandler
+from core.handlers.order_route_handler import OrderRouteHandler
+from core.handlers.registry import load_handlers_from_env
+from core.models import Action, Event
+
+
+class ChatAutoReplyHandler(EventHandler):
+    name = "chat_auto_reply"
+
+    def __init__(self, live):
+        self.live = live
+        self.enabled = os.getenv("CHAT_AUTO_REPLY_ENABLED", "true").lower() == "true"
+
+    def handle(self, event: Event):
+        if not self.enabled or event.event_type != "chat.message.received":
+            return []
+        return self.live.handle_chat_event(event)
 
 
 class XianyuLive:
@@ -56,6 +75,16 @@ class XianyuLive:
         
         # 模拟人工输入配置
         self.simulate_human_typing = os.getenv("SIMULATE_HUMAN_TYPING", "False").lower() == "true"
+        self.action_executor = ActionExecutor(
+            send_msg_func=self.send_msg,
+            set_manual_mode_func=self.set_manual_mode,
+        )
+        self.reply_bot = None
+        self.event_dedup_store = EventDedupStore(
+            db_path=self.context_manager.get_db_path(),
+            ttl_seconds=int(os.getenv("EVENT_DEDUP_TTL_SECONDS", "86400")),
+        )
+        self.event_handlers = self._build_event_handlers()
 
     async def refresh_token(self):
         """刷新token"""
@@ -299,6 +328,139 @@ class XianyuLive:
         else:
             self.enter_manual_mode(chat_id)
             return "manual"
+
+    def set_manual_mode(self, chat_id, enabled):
+        """设置人工接管模式"""
+        if enabled:
+            self.enter_manual_mode(chat_id)
+            return "manual"
+        self.exit_manual_mode(chat_id)
+        return "auto"
+
+    def _build_event_handlers(self):
+        handlers = [
+            ChatAutoReplyHandler(self),
+            OrderRouteHandler(item_id_resolver=self.context_manager.get_item_id_by_chat),
+        ]
+        external = load_handlers_from_env(os.getenv("EVENT_HANDLERS", ""))
+        handlers.extend(external)
+        return handlers
+
+    async def handle_pipeline_message(self, message, websocket):
+        events = parse_events(message)
+        if not events:
+            logger.debug("未识别到可处理事件")
+            return
+
+        for event in events:
+            if self.event_dedup_store.is_duplicate(event.event_id):
+                logger.info(f"重复事件已跳过: {event.event_id}")
+                continue
+            actions = []
+            for handler in self.event_handlers:
+                try:
+                    produced = handler.handle(event) or []
+                    actions.extend(produced)
+                except Exception as exc:
+                    logger.error(f"handler={handler.name} event={event.event_type} error={exc}")
+            if actions:
+                await self.action_executor.execute(actions, context={"websocket": websocket})
+
+    def handle_chat_event(self, event):
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        raw_message = payload.get("raw")
+        raw_message = raw_message if isinstance(raw_message, dict) else {}
+
+        chat_id = payload.get("chat_id")
+        send_user_id = payload.get("user_id")
+        send_user_name = payload.get("sender_name", "")
+        send_message = payload.get("message")
+        item_id = payload.get("item_id")
+        create_time = int(payload.get("created_at", event.occurred_at))
+
+        if not all(isinstance(v, str) and v for v in [chat_id, send_user_id, send_message]):
+            return []
+
+        # 时效性验证（过滤过期消息）
+        if (time.time() * 1000 - create_time) > self.message_expire_time:
+            logger.debug("过期消息丢弃")
+            return []
+
+        if not item_id:
+            logger.warning("无法获取商品ID")
+            return []
+        self.context_manager.bind_chat_item(chat_id, item_id)
+
+        # 卖家消息：支持人工接管切换和上下文记录
+        if send_user_id == self.myid:
+            if self.check_toggle_keywords(send_message):
+                next_manual_mode = not self.is_manual_mode(chat_id)
+                mode = self.set_manual_mode(chat_id, next_manual_mode)
+                if mode == "manual":
+                    logger.info(f"🔴 已接管会话 {chat_id} (商品: {item_id})")
+                else:
+                    logger.info(f"🟢 已恢复会话 {chat_id} 的自动回复 (商品: {item_id})")
+                return []
+            self.context_manager.add_message_by_chat(chat_id, self.myid, item_id, "assistant", send_message)
+            logger.info(f"卖家人工回复 (会话: {chat_id}, 商品: {item_id}): {send_message}")
+            return []
+
+        logger.info(
+            f"用户: {send_user_name} (ID: {send_user_id}), 商品: {item_id}, 会话: {chat_id}, 消息: {send_message}"
+        )
+
+        if self.is_manual_mode(chat_id):
+            logger.info(f"🔴 会话 {chat_id} 处于人工接管模式，跳过自动回复")
+            self.context_manager.add_message_by_chat(chat_id, send_user_id, item_id, "user", send_message)
+            return []
+
+        if self.is_bracket_system_message(send_message):
+            logger.info(f"检测到系统消息：'{send_message}'，跳过自动回复")
+            return []
+        if self.is_system_message(raw_message):
+            logger.debug("系统消息，跳过处理")
+            return []
+
+        item_info = self.context_manager.get_item_info(item_id)
+        if not item_info:
+            logger.info(f"从API获取商品信息: {item_id}")
+            api_result = self.xianyu.get_item_info(item_id)
+            if "data" in api_result and "itemDO" in api_result["data"]:
+                item_info = api_result["data"]["itemDO"]
+                self.context_manager.save_item_info(item_id, item_info)
+            else:
+                logger.warning(f"获取商品信息失败: {api_result}")
+                return []
+        else:
+            logger.info(f"从数据库获取商品信息: {item_id}")
+
+        item_description = f"当前商品的信息如下：{self.build_item_description(item_info)}"
+        context = self.context_manager.get_context_by_chat(chat_id)
+
+        bot_instance = self.reply_bot or globals().get("bot")
+        if bot_instance is None:
+            logger.warning("未配置回复机器人，跳过自动回复")
+            return []
+
+        bot_reply = bot_instance.generate_reply(send_message, item_description, context=context)
+        if bot_reply == "-":
+            logger.info(f"[无需回复] 用户 {send_user_name} 的消息被识别为无需回复类型")
+            return []
+
+        self.context_manager.add_message_by_chat(chat_id, send_user_id, item_id, "user", send_message)
+        if getattr(bot_instance, "last_intent", None) == "price":
+            self.context_manager.increment_bargain_count_by_chat(chat_id)
+            bargain_count = self.context_manager.get_bargain_count_by_chat(chat_id)
+            logger.info(f"用户 {send_user_name} 对商品 {item_id} 的议价次数: {bargain_count}")
+        self.context_manager.add_message_by_chat(chat_id, self.myid, item_id, "assistant", bot_reply)
+
+        logger.info(f"机器人回复: {bot_reply}")
+        return [
+            Action(
+                action_type="send_text",
+                payload={"chat_id": chat_id, "to_user_id": send_user_id, "text": bot_reply},
+            )
+        ]
     
     def format_price(self, price):
         """
@@ -404,148 +566,7 @@ class XianyuLive:
                 logger.error(f"消息解密失败: {e}")
                 return
 
-            try:
-                # 判断是否为订单消息,需要自行编写付款后的逻辑
-                if message['3']['redReminder'] == '等待买家付款':
-                    user_id = message['1'].split('@')[0]
-                    user_url = f'https://www.goofish.com/personal?userId={user_id}'
-                    logger.info(f'等待买家 {user_url} 付款')
-                    return
-                elif message['3']['redReminder'] == '交易关闭':
-                    user_id = message['1'].split('@')[0]
-                    user_url = f'https://www.goofish.com/personal?userId={user_id}'
-                    logger.info(f'买家 {user_url} 交易关闭')
-                    return
-                elif message['3']['redReminder'] == '等待卖家发货':
-                    user_id = message['1'].split('@')[0]
-                    user_url = f'https://www.goofish.com/personal?userId={user_id}'
-                    logger.info(f'交易成功 {user_url} 等待卖家发货')
-                    return
-
-            except:
-                pass
-
-            # 判断消息类型
-            if self.is_typing_status(message):
-                logger.debug("用户正在输入")
-                return
-            elif not self.is_chat_message(message):
-                logger.debug("其他非聊天消息")
-                logger.debug(f"原始消息: {message}")
-                return
-
-            # 处理聊天消息
-            create_time = int(message["1"]["5"])
-            send_user_name = message["1"]["10"]["reminderTitle"]
-            send_user_id = message["1"]["10"]["senderUserId"]
-            send_message = message["1"]["10"]["reminderContent"]
-            
-            # 时效性验证（过滤5分钟前消息）
-            if (time.time() * 1000 - create_time) > self.message_expire_time:
-                logger.debug("过期消息丢弃")
-                return
-                
-            # 获取商品ID和会话ID
-            url_info = message["1"]["10"]["reminderUrl"]
-            item_id = url_info.split("itemId=")[1].split("&")[0] if "itemId=" in url_info else None
-            chat_id = message["1"]["2"].split('@')[0]
-            
-            if not item_id:
-                logger.warning("无法获取商品ID")
-                return
-
-            # 检查是否为卖家（自己）发送的控制命令
-            if send_user_id == self.myid:
-                logger.debug("检测到卖家消息，检查是否为控制命令")
-                
-                # 检查切换命令
-                if self.check_toggle_keywords(send_message):
-                    mode = self.toggle_manual_mode(chat_id)
-                    if mode == "manual":
-                        logger.info(f"🔴 已接管会话 {chat_id} (商品: {item_id})")
-                    else:
-                        logger.info(f"🟢 已恢复会话 {chat_id} 的自动回复 (商品: {item_id})")
-                    return
-                
-                # 记录卖家人工回复
-                self.context_manager.add_message_by_chat(chat_id, self.myid, item_id, "assistant", send_message)
-                logger.info(f"卖家人工回复 (会话: {chat_id}, 商品: {item_id}): {send_message}")
-                return
-            
-            logger.info(f"用户: {send_user_name} (ID: {send_user_id}), 商品: {item_id}, 会话: {chat_id}, 消息: {send_message}")
-            
-            
-            # 如果当前会话处于人工接管模式，不进行自动回复
-            if self.is_manual_mode(chat_id):
-                logger.info(f"🔴 会话 {chat_id} 处于人工接管模式，跳过自动回复")
-                # 添加用户消息到上下文
-                self.context_manager.add_message_by_chat(chat_id, send_user_id, item_id, "user", send_message)
-                return
-            # 检查是否为带中括号的系统消息
-            if self.is_bracket_system_message(send_message):
-                logger.info(f"检测到系统消息：'{send_message}'，跳过自动回复")
-                return
-            if self.is_system_message(message):
-                logger.debug("系统消息，跳过处理")
-                return
-            # 从数据库中获取商品信息，如果不存在则从API获取并保存
-            item_info = self.context_manager.get_item_info(item_id)
-            if not item_info:
-                logger.info(f"从API获取商品信息: {item_id}")
-                api_result = self.xianyu.get_item_info(item_id)
-                if 'data' in api_result and 'itemDO' in api_result['data']:
-                    item_info = api_result['data']['itemDO']
-                    # 保存商品信息到数据库
-                    self.context_manager.save_item_info(item_id, item_info)
-                else:
-                    logger.warning(f"获取商品信息失败: {api_result}")
-                    return
-            else:
-                logger.info(f"从数据库获取商品信息: {item_id}")
-                
-            item_description=f"当前商品的信息如下：{self.build_item_description(item_info)}"
-            
-            # 获取完整的对话上下文
-            context = self.context_manager.get_context_by_chat(chat_id)
-            # 生成回复
-            bot_reply = bot.generate_reply(
-                send_message,
-                item_description,
-                context=context
-            )
-            
-            # 检查是否需要回复
-            if bot_reply == "-":
-                logger.info(f"[无需回复] 用户 {send_user_name} 的消息被识别为无需回复类型")
-                return
-            
-            # 添加用户消息到上下文
-            self.context_manager.add_message_by_chat(chat_id, send_user_id, item_id, "user", send_message)
-            
-            # 检查是否为价格意图，如果是则增加议价次数
-            if bot.last_intent == "price":
-                self.context_manager.increment_bargain_count_by_chat(chat_id)
-                bargain_count = self.context_manager.get_bargain_count_by_chat(chat_id)
-                logger.info(f"用户 {send_user_name} 对商品 {item_id} 的议价次数: {bargain_count}")
-            
-            # 添加机器人回复到上下文
-            self.context_manager.add_message_by_chat(chat_id, self.myid, item_id, "assistant", bot_reply)
-            
-            logger.info(f"机器人回复: {bot_reply}")
-            
-            # 模拟人工输入延迟
-            if self.simulate_human_typing:
-                # 基础延迟 0-1秒 + 每字 0.1-0.3秒
-                base_delay = random.uniform(0, 1)
-                typing_delay = len(bot_reply) * random.uniform(0.1, 0.3)
-                total_delay = base_delay + typing_delay
-                # 设置最大延迟上限，防止过长回复等待太久
-                total_delay = min(total_delay, 10.0)
-                
-                logger.info(f"模拟人工输入，延迟发送 {total_delay:.2f} 秒...")
-                await asyncio.sleep(total_delay)
-                
-            await self.send_msg(websocket, chat_id, send_user_id, bot_reply)
+            await self.handle_pipeline_message(message, websocket)
             
         except Exception as e:
             logger.error(f"处理消息时发生错误: {str(e)}")
@@ -774,5 +795,6 @@ if __name__ == '__main__':
     cookies_str = os.getenv("COOKIES_STR")
     bot = XianyuReplyBot()
     xianyuLive = XianyuLive(cookies_str)
+    xianyuLive.reply_bot = bot
     # 常驻进程
     asyncio.run(xianyuLive.main())

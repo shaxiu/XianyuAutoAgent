@@ -2,7 +2,13 @@ import sqlite3
 import os
 import json
 from datetime import datetime
-from loguru import logger
+
+try:
+    from loguru import logger
+except Exception:  # pragma: no cover - fallback for minimal test env
+    import logging
+
+    logger = logging.getLogger(__name__)
 
 
 class ChatContextManager:
@@ -24,6 +30,9 @@ class ChatContextManager:
         self.max_history = max_history
         self.db_path = db_path
         self._init_db()
+
+    def get_db_path(self):
+        return self.db_path
         
     def _init_db(self):
         """初始化数据库表结构"""
@@ -86,6 +95,19 @@ class ChatContextManager:
             description TEXT,
             last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
         )
+        ''')
+
+        # 会话到商品ID映射，用于订单事件补全item_id
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_item_routes (
+            chat_id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+
+        cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_chat_item_routes_item_id ON chat_item_routes (item_id)
         ''')
         
         conn.commit()
@@ -183,6 +205,23 @@ class ChatContextManager:
                 "INSERT INTO messages (user_id, item_id, role, content, timestamp, chat_id) VALUES (?, ?, ?, ?, ?, ?)",
                 (user_id, item_id, role, content, datetime.now().isoformat(), chat_id)
             )
+
+            if isinstance(chat_id, str) and chat_id and isinstance(item_id, str) and item_id:
+                cursor.execute(
+                    """
+                    INSERT INTO chat_item_routes (chat_id, item_id, last_updated)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(chat_id)
+                    DO UPDATE SET item_id = ?, last_updated = ?
+                    """,
+                    (
+                        chat_id,
+                        item_id,
+                        datetime.now().isoformat(),
+                        item_id,
+                        datetime.now().isoformat(),
+                    ),
+                )
             
             # 检查是否需要清理旧消息（基于chat_id）
             cursor.execute(
@@ -206,6 +245,72 @@ class ChatContextManager:
         except Exception as e:
             logger.error(f"添加消息到数据库时出错: {e}")
             conn.rollback()
+        finally:
+            conn.close()
+
+    def bind_chat_item(self, chat_id, item_id):
+        if not isinstance(chat_id, str) or not chat_id:
+            return
+        if not isinstance(item_id, str) or not item_id:
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO chat_item_routes (chat_id, item_id, last_updated)
+                VALUES (?, ?, ?)
+                ON CONFLICT(chat_id)
+                DO UPDATE SET item_id = ?, last_updated = ?
+                """,
+                (
+                    chat_id,
+                    item_id,
+                    datetime.now().isoformat(),
+                    item_id,
+                    datetime.now().isoformat(),
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error(f"绑定会话商品映射时出错: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def get_item_id_by_chat(self, chat_id):
+        if not isinstance(chat_id, str) or not chat_id:
+            return None
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT item_id FROM chat_item_routes WHERE chat_id = ?",
+                (chat_id,),
+            )
+            route = cursor.fetchone()
+            if route and route[0]:
+                return route[0]
+
+            # 兼容历史数据：从消息表回退获取最近的item_id
+            cursor.execute(
+                """
+                SELECT item_id FROM messages
+                WHERE chat_id = ? AND item_id IS NOT NULL AND item_id != ''
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """,
+                (chat_id,),
+            )
+            message_row = cursor.fetchone()
+            if message_row and message_row[0]:
+                return message_row[0]
+            return None
+        except Exception as e:
+            logger.error(f"获取会话商品映射时出错: {e}")
+            return None
         finally:
             conn.close()
 
