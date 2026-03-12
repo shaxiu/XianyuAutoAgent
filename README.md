@@ -76,6 +76,9 @@ SIMULATE_HUMAN_TYPING=True/False #模拟人工回复延迟
 注意：默认使用的模型是通义千问，如需使用其他API，请自行修改.env文件中的模型地址和模型名称；
 COOKIES_STR自行在闲鱼网页端获取cookies(网页端F12打开控制台，选择Network，点击Fetch/XHR,点击一个请求，查看cookies)
 
+注：使用非DashScope模型（如MiniMax、OpenAI、DeepSeek等）时，请将 ENABLE_SEARCH 设为 False，
+因为搜索增强为DashScope特有功能。
+
 4. 创建提示词文件prompts/*_prompt.txt（也可以直接将模板名称中的_example去掉），否则默认读取四个提示词模板中的内容
 ```
 
@@ -94,6 +97,19 @@ python main.py
 - `price_prompt.txt`: 价格专家提示词
 - `tech_prompt.txt`: 技术专家提示词
 - `default_prompt.txt`: 默认回复提示词
+
+## 🔌 支持的模型提供商
+
+本项目基于 OpenAI 兼容接口，支持多种大模型提供商。只需修改 `.env` 中的 `API_KEY`、`MODEL_BASE_URL` 和 `MODEL_NAME` 即可切换：
+
+| 提供商 | MODEL_BASE_URL | 推荐模型 | 备注 |
+|--------|---------------|----------|------|
+| 通义千问 (默认) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` | 支持搜索增强 |
+| [MiniMax](https://www.minimaxi.com/) | `https://api.minimax.io/v1` | `MiniMax-M2.5` | 204K上下文，高性价比 |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o` | |
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` | |
+
+> 💡 任何兼容 OpenAI API 的模型提供商均可使用，只需配置对应的 `MODEL_BASE_URL` 和 `MODEL_NAME`。
 
 ## 🤝 参与贡献
 
