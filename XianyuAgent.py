@@ -219,6 +219,14 @@ class BaseAgent:
             {"role": "user", "content": user_msg}
         ]
 
+    @staticmethod
+    def _strip_think_tags(text: str) -> str:
+        """移除模型返回的思考过程标签（如 <think>...</think>）"""
+        if not text:
+            return text
+        cleaned = re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL)
+        return cleaned.strip()
+
     def _call_llm(self, messages: List[Dict], temperature: float = 0.4) -> str:
         """调用大模型"""
         response = self.client.chat.completions.create(
@@ -228,7 +236,8 @@ class BaseAgent:
             max_tokens=500,
             top_p=0.8
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        return self._strip_think_tags(content)
 
 
 class PriceAgent(BaseAgent):
@@ -247,7 +256,8 @@ class PriceAgent(BaseAgent):
             max_tokens=500,
             top_p=0.8
         )
-        return self.safety_filter(response.choices[0].message.content)
+        content = self._strip_think_tags(response.choices[0].message.content)
+        return self.safety_filter(content)
 
     def _calc_temperature(self, bargain_count: int) -> float:
         """动态温度策略"""
@@ -261,18 +271,23 @@ class TechAgent(BaseAgent):
         messages = self._build_messages(user_msg, item_desc, context)
         # messages[0]['content'] += "\n▲知识库：\n" + self._fetch_tech_specs()
 
-        response = self.client.chat.completions.create(
-            model=os.getenv("MODEL_NAME", "qwen-max"),
-            messages=messages,
-            temperature=0.4,
-            max_tokens=500,
-            top_p=0.8,
-            extra_body={
-                "enable_search": True,
-            }
-        )
+        kwargs = {
+            "model": os.getenv("MODEL_NAME", "qwen-max"),
+            "messages": messages,
+            "temperature": 0.4,
+            "max_tokens": 500,
+            "top_p": 0.8,
+        }
 
-        return self.safety_filter(response.choices[0].message.content)
+        # enable_search 为阿里云DashScope特有功能，其他模型提供商不支持
+        # 通过环境变量 ENABLE_SEARCH 控制，默认开启以兼容原有行为
+        if os.getenv("ENABLE_SEARCH", "True").lower() == "true":
+            kwargs["extra_body"] = {"enable_search": True}
+
+        response = self.client.chat.completions.create(**kwargs)
+
+        content = self._strip_think_tags(response.choices[0].message.content)
+        return self.safety_filter(content)
 
 
     # def _fetch_tech_specs(self) -> str:
