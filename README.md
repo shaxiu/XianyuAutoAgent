@@ -105,7 +105,7 @@ python main.py
 | 提供商 | MODEL_BASE_URL | 推荐模型 | 备注 |
 |--------|---------------|----------|------|
 | 通义千问 (默认) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` | 支持搜索增强 |
-| [MiniMax](https://www.minimaxi.com/) | `https://api.minimax.io/v1` | `MiniMax-M2.5` | 204K上下文，高性价比 |
+| [MiniMax](https://www.minimaxi.com/) | `https://api.minimax.io/v1` | `MiniMax-M2.7` | 204K上下文，高性价比 |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o` | |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` | |
 
