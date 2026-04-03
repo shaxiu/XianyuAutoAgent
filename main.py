@@ -56,6 +56,10 @@ class XianyuLive:
         
         # 模拟人工输入配置
         self.simulate_human_typing = os.getenv("SIMULATE_HUMAN_TYPING", "False").lower() == "true"
+        
+        # 消息去重配置
+        self.processed_message_ids = set()
+        self.max_processed_ids = int(os.getenv("MAX_PROCESSED_IDS", "1000"))
 
     async def refresh_token(self):
         """刷新token"""
@@ -448,7 +452,17 @@ class XianyuLive:
             # 获取商品ID和会话ID
             url_info = message["1"]["10"]["reminderUrl"]
             item_id = url_info.split("itemId=")[1].split("&")[0] if "itemId=" in url_info else None
+            message_id = url_info.split("messageId=")[1].split("&")[0] if "messageId=" in url_info else None
             chat_id = message["1"]["2"].split('@')[0]
+            
+            # 消息去重：过滤已处理的重复消息
+            if message_id:
+                if message_id in self.processed_message_ids:
+                    logger.debug(f"重复消息已过滤: {message_id}")
+                    return
+                if len(self.processed_message_ids) >= self.max_processed_ids:
+                    self.processed_message_ids.clear()
+                self.processed_message_ids.add(message_id)
             
             if not item_id:
                 logger.warning("无法获取商品ID")
