@@ -210,7 +210,14 @@ class BaseAgent:
         """生成回复模板方法"""
         messages = self._build_messages(user_msg, item_desc, context)
         response = self._call_llm(messages)
+        response = self._remove_think_tags(response)
         return self.safety_filter(response)
+
+    def _remove_think_tags(self, text: str) -> str:
+        """移除<think>>标签中的思考内容"""
+        import re
+        # 匹配<think>...</think>标签及其内容
+        return re.sub(r'<think>[\s\S]*?</think>', '', text)
 
     def _build_messages(self, user_msg: str, item_desc: str, context: str) -> List[Dict]:
         """构建消息链"""
@@ -247,7 +254,8 @@ class PriceAgent(BaseAgent):
             max_tokens=500,
             top_p=0.8
         )
-        return self.safety_filter(response.choices[0].message.content)
+        response = self._remove_think_tags(response.choices[0].message.content)
+        return self.safety_filter(response)
 
     def _calc_temperature(self, bargain_count: int) -> float:
         """动态温度策略"""
@@ -271,8 +279,8 @@ class TechAgent(BaseAgent):
                 "enable_search": True,
             }
         )
-
-        return self.safety_filter(response.choices[0].message.content)
+        response = self._remove_think_tags(response.choices[0].message.content)
+        return self.safety_filter(response)
 
 
     # def _fetch_tech_specs(self) -> str:

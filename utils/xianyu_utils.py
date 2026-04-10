@@ -11,8 +11,10 @@ def trans_cookies(cookies_str: str) -> Dict[str, str]:
     cookies = {}
     for cookie in cookies_str.split("; "):
         try:
+            if not cookie:  # 跳过空字符串
+                continue
             parts = cookie.split('=', 1)
-            if len(parts) == 2:
+            if len(parts) == 2 and parts[0]:  # 确保key不为空
                 cookies[parts[0]] = parts[1]
         except:
             continue
