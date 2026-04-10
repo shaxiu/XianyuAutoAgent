@@ -214,10 +214,20 @@ class BaseAgent:
         return self.safety_filter(response)
 
     def _remove_think_tags(self, text: str) -> str:
-        """移除<think>>标签中的思考内容"""
+        """清理AI返回的内容"""
         import re
-        # 匹配<think>...</think>标签及其内容
-        return re.sub(r'<think>[\s\S]*?</think>', '', text)
+        # 移除<think>...</think>标签及其内容
+        text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+        # 移除开头的空行
+        text = text.lstrip('\n')
+        # 合并多余的空行（超过一个换行的缩为单个换行）
+        text = re.sub(r'\n{2,}', '\n', text)
+        # 中文断句用逗号，不用空格分隔：中文句子之间如有多余空格改为逗号
+        # 对于中文句子，将句号后的空格去掉（中文句号是。）
+        text = re.sub(r'。(?=\s)', '。', text)
+        # 移除句子之间的多余空格，保留必要的间隔
+        text = re.sub(r' +', ' ', text)
+        return text.strip()
 
     def _build_messages(self, user_msg: str, item_desc: str, context: str) -> List[Dict]:
         """构建消息链"""
