@@ -109,6 +109,32 @@ class XianyuLive:
                 logger.error(f"Token刷新循环出错: {e}")
                 await asyncio.sleep(60)
 
+    async def send_read_ack(self, ws, pts=None):
+        """Send SyncStatus/ackDiff to mark received messages as read on the seller's account."""
+        if pts is None:
+            pts = int(time.time() * 1000) * 1000
+        msg = {
+            "lwp": "/r/SyncStatus/ackDiff",
+            "headers": {"mid": generate_mid()},
+            "body": [
+                {
+                    "pipeline": "sync",
+                    "tooLong2Tag": "PNM,1",
+                    "channel": "sync",
+                    "topic": "sync",
+                    "highPts": 0,
+                    "pts": pts,
+                    "seq": 0,
+                    "timestamp": int(time.time() * 1000)
+                }
+            ]
+        }
+        try:
+            await ws.send(json.dumps(msg))
+            logger.debug("已发送消息已读确认")
+        except Exception as e:
+            logger.warning(f"发送消息已读确认失败: {e}")
+
     async def send_msg(self, ws, cid, toid, text):
         text = {
             "contentType": 1,
@@ -517,6 +543,9 @@ class XianyuLive:
             # 检查是否需要回复
             if bot_reply == "-":
                 logger.info(f"[无需回复] 用户 {send_user_name} 的消息被识别为无需回复类型")
+                # Even when not replying, mark the message as read to clear unread indicators
+                pts = sync_data.get("pts", create_time * 1000)
+                await self.send_read_ack(websocket, pts=pts)
                 return
             
             # 添加用户消息到上下文
@@ -546,6 +575,9 @@ class XianyuLive:
                 await asyncio.sleep(total_delay)
                 
             await self.send_msg(websocket, chat_id, send_user_id, bot_reply)
+            # Mark the buyer's message as read to clear unread indicators on the seller's account
+            pts = sync_data.get("pts", create_time * 1000)
+            await self.send_read_ack(websocket, pts=pts)
             
         except Exception as e:
             logger.error(f"处理消息时发生错误: {str(e)}")
