@@ -210,7 +210,24 @@ class BaseAgent:
         """生成回复模板方法"""
         messages = self._build_messages(user_msg, item_desc, context)
         response = self._call_llm(messages)
+        response = self._remove_think_tags(response)
         return self.safety_filter(response)
+
+    def _remove_think_tags(self, text: str) -> str:
+        """清理AI返回的内容"""
+        import re
+        # 移除<think>...</think>标签及其内容
+        text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+        # 移除开头的空行
+        text = text.lstrip('\n')
+        # 合并多余的空行（超过一个换行的缩为单个换行）
+        text = re.sub(r'\n{2,}', '\n', text)
+        # 中文断句用逗号，不用空格分隔：中文句子之间如有多余空格改为逗号
+        # 对于中文句子，将句号后的空格去掉（中文句号是。）
+        text = re.sub(r'。(?=\s)', '。', text)
+        # 移除句子之间的多余空格，保留必要的间隔
+        text = re.sub(r' +', ' ', text)
+        return text.strip()
 
     def _build_messages(self, user_msg: str, item_desc: str, context: str) -> List[Dict]:
         """构建消息链"""
@@ -247,7 +264,8 @@ class PriceAgent(BaseAgent):
             max_tokens=500,
             top_p=0.8
         )
-        return self.safety_filter(response.choices[0].message.content)
+        response = self._remove_think_tags(response.choices[0].message.content)
+        return self.safety_filter(response)
 
     def _calc_temperature(self, bargain_count: int) -> float:
         """动态温度策略"""
@@ -271,8 +289,8 @@ class TechAgent(BaseAgent):
                 "enable_search": True,
             }
         )
-
-        return self.safety_filter(response.choices[0].message.content)
+        response = self._remove_think_tags(response.choices[0].message.content)
+        return self.safety_filter(response)
 
 
     # def _fetch_tech_specs(self) -> str:
