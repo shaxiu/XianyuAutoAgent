@@ -123,7 +123,7 @@ https://github.com/cv-cat/XianYuApis
     </tr>
     <tr>
       <td><img src="./images/wx_group24.png" width="300px" alt="交流群24"></td>
-      <td><img src="./images/wx_group25.png" width="300px" alt="交流群25"></td>
+      <td><img src="./images/wx_group25-1.png" width="300px" alt="交流群25"></td>
     </tr>
   </table>
 </div>
