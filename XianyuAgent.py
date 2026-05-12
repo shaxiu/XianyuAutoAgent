@@ -16,6 +16,7 @@ class XianyuReplyBot:
         self._init_agents()
         self.router = IntentRouter(self.agents['classify'])
         self.last_intent = None  # 记录最后一次意图
+        self.filter_thinking = os.getenv("FILTER_THINKING", "True").lower() in ("true", "1", "yes")
 
 
     def _init_agents(self):
@@ -61,8 +62,15 @@ class XianyuReplyBot:
             logger.error(f"加载提示词时出错: {e}")
             raise
 
+    def _filter_thinking(self, text: str) -> str:
+        """过滤AI模型的思考过程（<think>...</think>标签）"""
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        return re.sub(r'\n{3,}', '\n\n', text).strip()
+
     def _safe_filter(self, text: str) -> str:
         """安全过滤模块"""
+        if self.filter_thinking:
+            text = self._filter_thinking(text)
         blocked_phrases = ["微信", "QQ", "支付宝", "银行卡", "线下"]
         return "[安全提醒]请通过平台沟通" if any(p in text for p in blocked_phrases) else text
 
