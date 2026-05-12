@@ -14,7 +14,7 @@ def trans_cookies(cookies_str: str) -> Dict[str, str]:
             parts = cookie.split('=', 1)
             if len(parts) == 2:
                 cookies[parts[0]] = parts[1]
-        except:
+        except Exception:
             continue
     return cookies
 
@@ -312,7 +312,7 @@ def decrypt(data: str) -> str:
                 if isinstance(obj, bytes):
                     try:
                         return obj.decode('utf-8')
-                    except:
+                    except Exception:
                         return base64.b64encode(obj).decode('utf-8')
                 elif hasattr(obj, '__dict__'):
                     return obj.__dict__
@@ -326,7 +326,7 @@ def decrypt(data: str) -> str:
             try:
                 text_result = decoded_bytes.decode('utf-8')
                 return json.dumps({"text": text_result})
-            except:
+            except Exception:
                 # 最后的备选方案：返回十六进制表示
                 hex_result = decoded_bytes.hex()
                 return json.dumps({"hex": hex_result, "error": f"Decode failed: {str(e)}"})
