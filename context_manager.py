@@ -222,6 +222,8 @@ class ChatContextManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        logger.info(f"连接本地数据库成功，chatId {chat_id}，开始获取对话历史")
+
         try:
             cursor.execute(
                 """
@@ -249,6 +251,8 @@ class ChatContextManager:
         finally:
             conn.close()
         
+        logger.info(f"获取对话历史完成，chatId {chat_id}，对话历史长度: {len(messages)}")
+
         return messages
 
     def increment_bargain_count_by_chat(self, chat_id):

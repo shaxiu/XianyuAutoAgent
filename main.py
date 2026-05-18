@@ -9,7 +9,7 @@ from dotenv import load_dotenv, set_key
 from XianyuApis import XianyuApis
 import sys
 import random
-
+import re
 
 from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, generate_device_id, decrypt
 from XianyuAgent import XianyuReplyBot
@@ -56,6 +56,26 @@ class XianyuLive:
         
         # 模拟人工输入配置
         self.simulate_human_typing = os.getenv("SIMULATE_HUMAN_TYPING", "False").lower() == "true"
+
+        # 加载订单回复配置
+        self.order_reply_config = self._load_order_reply_config()
+
+    def _load_order_reply_config(self):
+        """加载订单回复配置文件"""
+        config_path = "order_reply_config.json"
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"加载 order_reply_config.json 失败: {e}")
+            return {"items": [], "default_reply": ""}
+
+    def _match_order_reply(self, title: str) -> str:
+        """根据商品标题匹配订单回复，返回回复文本，无匹配返回空字符串"""
+        for item in self.order_reply_config.get('items', []):
+            if any(kw in title for kw in item.get('keywords', [])):
+                return item.get('reply', '')
+        return self.order_reply_config.get('default_reply', '')
 
     async def refresh_token(self):
         """刷新token"""
@@ -356,26 +376,6 @@ class XianyuLive:
     async def handle_message(self, message_data, websocket):
         """处理所有类型的消息"""
         try:
-
-            try:
-                message = message_data
-                ack = {
-                    "code": 200,
-                    "headers": {
-                        "mid": message["headers"]["mid"] if "mid" in message["headers"] else generate_mid(),
-                        "sid": message["headers"]["sid"] if "sid" in message["headers"] else '',
-                    }
-                }
-                if 'app-key' in message["headers"]:
-                    ack["headers"]["app-key"] = message["headers"]["app-key"]
-                if 'ua' in message["headers"]:
-                    ack["headers"]["ua"] = message["headers"]["ua"]
-                if 'dt' in message["headers"]:
-                    ack["headers"]["dt"] = message["headers"]["dt"]
-                await websocket.send(json.dumps(ack))
-            except Exception as e:
-                pass
-
             # 如果不是同步包消息，直接返回
             if not self.is_sync_package(message_data):
                 return
@@ -420,6 +420,25 @@ class XianyuLive:
                     user_id = message['1'].split('@')[0]
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
                     logger.info(f'交易成功 {user_url} 等待卖家发货')
+                    try:
+                        chat_id = message["1"]["2"].split('@')[0]
+                        url_info = message["1"]["10"]["reminderUrl"]
+                        item_id = url_info.split("itemId=")[1].split("&")[0] if "itemId=" in url_info else None
+                        if item_id:
+                            item_info = self.context_manager.get_item_info(item_id)
+                            if not item_info:
+                                api_result = self.xianyu.get_item_info(item_id)
+                                if 'data' in api_result and 'itemDO' in api_result['data']:
+                                    item_info = api_result['data']['itemDO']
+                                    self.context_manager.save_item_info(item_id, item_info)
+                            if item_info:
+                                title = item_info.get('title', '')
+                                reply_text = self._match_order_reply(title)
+                                if reply_text:
+                                    await self.send_msg(websocket, chat_id, user_id, reply_text)
+                                    logger.info(f'已发送发货回复给会话 {chat_id}: {reply_text}')
+                    except Exception as e:
+                        logger.error(f'发货回复处理失败: {e}')
                     return
 
             except:
@@ -502,11 +521,14 @@ class XianyuLive:
                     return
             else:
                 logger.info(f"从数据库获取商品信息: {item_id}")
-                
+                logger.info(f"获取商品信息数据结构: {json.dumps(item_info, ensure_ascii=False)}")
+
             item_description=f"当前商品的信息如下：{self.build_item_description(item_info)}"
             
             # 获取完整的对话上下文
             context = self.context_manager.get_context_by_chat(chat_id)
+
+            logger.info(f"获取完整的对话上下文完成，chatId {chat_id}")
             # 生成回复
             bot_reply = bot.generate_reply(
                 send_message,
@@ -531,6 +553,9 @@ class XianyuLive:
             # 添加机器人回复到上下文
             self.context_manager.add_message_by_chat(chat_id, self.myid, item_id, "assistant", bot_reply)
             
+            # 清除think信息，只保留用户和机器人回复
+            bot_reply = await self.clean_think_text(bot_reply)
+            logger.info(f"添加机器人回复到上下文完成，chatId {chat_id}")
             logger.info(f"机器人回复: {bot_reply}")
             
             # 模拟人工输入延迟
@@ -550,6 +575,15 @@ class XianyuLive:
         except Exception as e:
             logger.error(f"处理消息时发生错误: {str(e)}")
             logger.debug(f"原始消息: {message_data}")
+
+
+    async def clean_think_text(self, text):
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        text = text.replace('\n', '').replace('\r', '')
+        logger.info(f"清除think信息完成，text: {text}")
+        return text.strip()
+
+
 
     async def send_heartbeat(self, ws):
         """发送心跳包并等待响应"""
