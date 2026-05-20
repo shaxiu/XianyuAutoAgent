@@ -550,6 +550,7 @@ class XianyuLive:
         except Exception as e:
             logger.error(f"处理消息时发生错误: {str(e)}")
             logger.debug(f"原始消息: {message_data}")
+            message = None  # 确保 message 在异常处理中被定义
 
     async def send_heartbeat(self, ws):
         """发送心跳包并等待响应"""

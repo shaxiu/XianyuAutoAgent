@@ -222,33 +222,34 @@ class ChatContextManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        messages = []
         try:
             cursor.execute(
                 """
-                SELECT role, content FROM messages 
-                WHERE chat_id = ? 
+                SELECT role, content FROM messages
+                WHERE chat_id = ?
                 ORDER BY timestamp ASC
                 LIMIT ?
-                """, 
+                """,
                 (chat_id, self.max_history)
             )
-            
+
             messages = [{"role": role, "content": content} for role, content in cursor.fetchall()]
-            
+
             # 获取议价次数并添加到上下文中
             bargain_count = self.get_bargain_count_by_chat(chat_id)
             if bargain_count > 0:
                 messages.append({
-                    "role": "system", 
+                    "role": "system",
                     "content": f"议价次数: {bargain_count}"
                 })
-            
+
         except Exception as e:
             logger.error(f"获取对话历史时出错: {e}")
             messages = []
         finally:
             conn.close()
-        
+
         return messages
 
     def increment_bargain_count_by_chat(self, chat_id):
