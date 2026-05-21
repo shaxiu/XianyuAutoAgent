@@ -357,25 +357,6 @@ class XianyuLive:
         """处理所有类型的消息"""
         try:
 
-            try:
-                message = message_data
-                ack = {
-                    "code": 200,
-                    "headers": {
-                        "mid": message["headers"]["mid"] if "mid" in message["headers"] else generate_mid(),
-                        "sid": message["headers"]["sid"] if "sid" in message["headers"] else '',
-                    }
-                }
-                if 'app-key' in message["headers"]:
-                    ack["headers"]["app-key"] = message["headers"]["app-key"]
-                if 'ua' in message["headers"]:
-                    ack["headers"]["ua"] = message["headers"]["ua"]
-                if 'dt' in message["headers"]:
-                    ack["headers"]["dt"] = message["headers"]["dt"]
-                await websocket.send(json.dumps(ack))
-            except Exception as e:
-                pass
-
             # 如果不是同步包消息，直接返回
             if not self.is_sync_package(message_data):
                 return
