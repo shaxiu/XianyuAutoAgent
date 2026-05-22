@@ -422,7 +422,7 @@ class XianyuLive:
                     logger.info(f'交易成功 {user_url} 等待卖家发货')
                     return
 
-            except:
+            except Exception:
                 pass
 
             # 判断消息类型
