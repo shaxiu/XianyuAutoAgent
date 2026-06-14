@@ -14,6 +14,7 @@ import random
 from utils.xianyu_utils import generate_mid, generate_uuid, trans_cookies, generate_device_id, decrypt
 from XianyuAgent import XianyuReplyBot
 from context_manager import ChatContextManager
+from xianyu_qr_login import QRLoginError, run_qr_login_cli
 
 
 class XianyuLive:
@@ -724,7 +725,16 @@ def check_and_complete_env():
         if not curr_val or curr_val == placeholder:
             logger.warning(f"配置项 [{key}] 未设置或为默认值，请输入")
             while True:
-                val = input(f"请输入 {key}: ").strip()
+                prompt = f"请输入 {key}: "
+                if key == "COOKIES_STR":
+                    prompt = "请输入 COOKIES_STR，或直接回车使用扫码登录: "
+                val = input(prompt).strip()
+                if key == "COOKIES_STR" and not val:
+                    try:
+                        val = run_qr_login_cli()
+                    except QRLoginError as e:
+                        logger.error(f"扫码登录失败: {e}")
+                        continue
                 if val:
                     # 更新当前环境
                     os.environ[key] = val
@@ -748,6 +758,18 @@ def check_and_complete_env():
         logger.info("新的配置已保存/更新至 .env 文件中")
 
 
+def run_qr_login_command():
+    """独立执行扫码登录并保存COOKIES_STR。"""
+    cookies_str = run_qr_login_cli()
+    os.environ["COOKIES_STR"] = cookies_str
+    env_path = ".env"
+    if not os.path.exists(env_path):
+        with open(env_path, 'w', encoding='utf-8') as f:
+            pass
+    set_key(env_path, "COOKIES_STR", cookies_str)
+    logger.info("扫码登录 Cookie 已保存至 .env")
+
+
 if __name__ == '__main__':
     # 加载环境变量
     if os.path.exists(".env"):
@@ -767,6 +789,14 @@ if __name__ == '__main__':
         format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
     )
     logger.info(f"日志级别设置为: {log_level}")
+
+    if "--qr-login" in sys.argv:
+        try:
+            run_qr_login_command()
+            sys.exit(0)
+        except QRLoginError as e:
+            logger.error(f"扫码登录失败: {e}")
+            sys.exit(1)
     
     # 交互式检查并补全配置
     check_and_complete_env()

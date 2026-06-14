@@ -34,6 +34,10 @@ env/
 logs/
 *.log
 
+# 运行时文件
+data/*.pid
+data/xianyu-login-qr.png
+
 # 数据库文件
 *.db
 *.sqlite3
@@ -51,4 +55,4 @@ htmlcov/
 .tox/
 .nox/
 .hypothesis/
-.coverage.* 
+.coverage.*
